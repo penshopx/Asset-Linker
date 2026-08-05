@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "LKUT Grade Simulator"
+description = "An enterprise-grade LKUT Grade Simulator for Indonesian construction companies (BUJK) based on Permen PUPR No. 7 Tahun 2024. Multi-step wizard that collects financial, organizational health, and project performance data, then calculates a final grade (AAA to D) with dynamic recommendations and action CTAs."
+version = "1.0.0"
+id = "artifacts/lkut-simulator"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23125
+
+[services.development]
+run = "pnpm --filter @workspace/lkut-simulator run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/lkut-simulator", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/lkut-simulator/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23125"
+BASE_PATH = "/"
