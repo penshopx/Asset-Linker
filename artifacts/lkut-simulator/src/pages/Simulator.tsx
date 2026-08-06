@@ -24,7 +24,25 @@ export default function Simulator() {
   const methods = useForm<LkutFormData>({ defaultValues });
   const [step, setStep] = useState(1);
 
-  const nextStep = () => setStep(s => Math.min(4, s + 1));
+  const STEP_FIELDS: Record<number, (keyof LkutFormData)[]> = {
+    1: ['assetGrowth', 'gpm', 'assetTurnover', 'currentRatio', 'der', 'fcf'],
+    2: [
+      'gcgYears', 'certificates', 'awards',
+      'moSupplyChain', 'moMaterialQuality', 'moEquipmentQuality', 'moK3',
+      'moProcedures', 'moResultQuality', 'moOM', 'moSocialProtection', 'moEnvironment',
+      'equipmentRatio', 'equipmentNewness',
+      'hrProductivity', 'hrEmpowerment', 'companyCapacity',
+    ],
+  };
+
+  const nextStep = async () => {
+    const fields = STEP_FIELDS[step];
+    if (fields) {
+      const valid = await methods.trigger(fields);
+      if (!valid) return;
+    }
+    setStep(s => Math.min(4, s + 1));
+  };
   const prevStep = () => setStep(s => Math.max(1, s - 1));
 
   return (

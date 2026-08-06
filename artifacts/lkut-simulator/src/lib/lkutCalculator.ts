@@ -51,6 +51,11 @@ export const WEIGHTS = {
   hrProductivity: 10, hrEmpowerment: 8, companyCapacity: 3
 };
 
+export function getRangeFromBands(bands: [number, number][]): { min: number; max: number } {
+  const all = bands.flat();
+  return { min: Math.min(...all), max: Math.max(...all) };
+}
+
 export function getLowestIndicators(scores: Record<string, number>, count: number): string[] {
   return Object.entries(scores)
     .sort(([, a], [, b]) => a - b)
