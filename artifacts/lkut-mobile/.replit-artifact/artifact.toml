@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/lkut-mobile/"
+title = "LKUT Mobile"
+description = "Mobile companion app for Indonesian construction company executives to simulate their LKUT grade on the go. Features a 4-step wizard covering financial ratios, organizational metrics, and project performance. Calculates grade (AAA to D) per Permen PUPR No. 7/2024 and shows improvement priorities linking to dokumenproyek.com."
+version = "1.0.0"
+id = "artifacts/lkut-mobile"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/lkut-mobile/" ]
+localPort = 20989
+
+[services.development]
+run = "pnpm --filter @workspace/lkut-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/lkut-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/lkut-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "20989"
+BASE_PATH = "/lkut-mobile/"
