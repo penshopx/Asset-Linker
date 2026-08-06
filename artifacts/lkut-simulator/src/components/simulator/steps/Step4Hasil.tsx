@@ -28,7 +28,7 @@ const getActionContent = (key: string) => {
     hrProductivity: 'Produktivitas SDM',
     companyCapacity: 'Kapasitas Perusahaan'
   };
-  return { title: `Optimalkan Indikator: ${nameMap[key] || key}`, btnText: 'Konsultasi Sekarang', href: 'https://dokumenproyek.com' };
+  return { title: `Optimalkan Indikator: ${nameMap[key] || key}`, btnText: 'Konsultasi Sekarang', href: 'https://dp.dokumenproyek.com' };
 }
 
 const Gauge = ({ score, grade }: { score: number, grade: string }) => {
@@ -162,7 +162,7 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
             <p className="text-red-800 text-sm font-medium">Anda wajib mengikuti PUB Khusus sesuai Permen PUPR 7/2024 agar tidak di-blacklist dari tender BUMN!</p>
           </div>
           <a 
-            href="https://dokumenproyek.com" 
+            href="https://dp.dokumenproyek.com" 
             className="shrink-0 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg shadow-sm transition-colors w-full md:w-auto text-center"
             data-testid="cta-pub"
           >
