@@ -1,0 +1,36 @@
+I have the official government regulation document (Permen PUPR 7/2024 Lampiran) containing the EXACT mathematical thresholds and weights for calculating the BUJK Annual Performance Grade (LKUT). 
+
+Please UPGRADE the calculation engine (e.g., lib/lkutCalculator.ts or equivalent) in this LKUT Simulator app to STRICTLY follow these official tables for "Pekerjaan Konstruksi Bersifat Umum atau Spesialis" (which covers 80% of our users):
+
+1. FINAL FORMULA:
+Final Grade = (40% * Kinerja Proyek) + (60% * Kinerja Manajemen Perusahaan).
+
+2. KINERJA MANAJEMEN PERUSAHAAN (100% breakdown):
+- Aspek Keuangan (30% total, 5% each for 6 indicators):
+  a. Asset Growth (%): SR(-5.4 to 3.6), R(3.7 to 12.7), C(12.8 to 21.8), T(21.9 to 30.9), ST(31 to 40)
+  b. Gross Profit Margin (%): SR(1.6 to 5.6), R(5.7 to 9.7), C(9.8 to 13.8), T(13.9 to 17.9), ST(18 to 22)
+  c. Asset Turnover (%): SR(2.6 to 31.6), R(31.7 to 60.7), C(60.8 to 89.8), T(89.9 to 118.9), ST(119 to 148)
+  d. Current Ratio (%): SR(2.6 to 51.6), R(51.7 to 100.7), C(100.8 to 149.8), T(149.9 to 198.9), ST(199 to 248)
+  e. DER (%): [INVERSE logic: lower is better] SR(700.4 to 560.4), R(560.3 to 420.3), C(420.2 to 280.2), T(280.1 to 140.1), ST(140 to 0)
+  f. Free Cash Flow: SR(0 to 0.1), R(0.2 to 1.7), C(1.8 to 3.3), T(3.4 to 4.9), ST(5 to 6.5)
+
+- Aspek Kesehatan Organisasi (70% total):
+  a. Perkembangan Organisasi (15%): GCG Years (8%), Certificates (4%), Awards (3%). Thresholds: GCG Years SR(0-6.6) to ST(16-19). Certs SR(0-2) to ST(12-14). Awards SR(0-1) to ST(4.1-5).
+  b. Manajemen Operasi (18%): 9 items (Supply chain, material, equipment, K3, procedures, result quality, O&M, social, environment). Each is 2%. Thresholds for ALL 9: SR(0-6.6) to ST(16-19) years applied.
+  c. Pemanfaatan Teknologi (16%): Equipment Ratio (10%) SR(0-0.5) to ST(2.4-2.9). Equipment Newness <= 5 yrs (6%) SR(0-13.6) to ST(44-54).
+  d. Perkembangan SDM (21%): HR Productivity (10%) SR(1000-1499) to ST(3000-3500). HR Empowerment/training (8%) SR(4.6-13.6) to ST(41-50). Company Capacity (3%) [INVERSE] SR(25.4-20.4) to ST(5-0).
+
+3. SCORING LOGIC (Interpolasi Linier):
+- Map the 5 bands to a 0-100 conversion score: Sangat Rendah (0-20), Rendah (21-40), Cukup (41-60), Tinggi (61-80), Sangat Tinggi (81-100).
+- Use linear interpolation within each band. For example, if Asset Growth is 8%, it falls in "Rendah" (3.7 to 12.7). The score should be interpolated between 21 and 40.
+- Handle INVERSE indicators (DER, Kapasitas Perusahaan) correctly: a lower raw value yields a HIGHER score (81-100).
+
+4. FINAL GRADE THRESHOLDS (For Kualifikasi MENENGAH):
+- AAA: 80% - 100% (Sangat Baik)
+- AA: 70% - 79% (Baik)
+- A: 60% - 69% (Cukup Baik)
+- B: 50% - 59% (Sedang)
+- C: 40% - 49% (Rendah)
+- D: <= 39% (Sangat Rendah)
+
+Please rewrite the calculation functions to implement these EXACT government thresholds. Add a small UI badge that says "Kalkulator Terverifikasi Permen PUPR 7/2024" to build trust.

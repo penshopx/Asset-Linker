@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
 import { LkutFormData } from '@/types/lkut';
 
 import { StepIndicator } from '@/components/simulator/StepIndicator';
@@ -52,6 +52,10 @@ export default function Simulator() {
           <div>
             <h1 className="text-2xl font-black tracking-tight text-white mb-1">LKUT Grade Simulator</h1>
             <p className="text-amber-500 font-medium text-sm">Simulasi Kualifikasi BUJK berdasarkan Permen PUPR No. 7 Tahun 2024</p>
+            <span className="inline-flex items-center gap-1.5 mt-2 bg-emerald-900/60 border border-emerald-600/50 text-emerald-300 text-xs font-semibold px-2.5 py-1 rounded-full">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Kalkulator Terverifikasi Permen PUPR 7/2024
+            </span>
           </div>
           <a href="https://dokumenproyek.com" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-300 hover:text-white transition-colors bg-slate-800 px-4 py-2 rounded-md hover:bg-slate-700 w-fit">
             <ArrowLeft className="w-4 h-4" />
