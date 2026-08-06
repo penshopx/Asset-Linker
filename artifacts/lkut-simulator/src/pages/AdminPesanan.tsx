@@ -1,0 +1,342 @@
+import { useState, useEffect, useCallback } from 'react';
+import { Lock, RefreshCw, MessageCircle, ExternalLink, ChevronDown, Package, CheckCircle2, Clock, XCircle, AlertCircle } from 'lucide-react';
+
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
+
+type OrderStatus = 'baru' | 'diproses' | 'selesai' | 'dibatalkan';
+
+interface Order {
+  id: string;
+  created_at: string;
+  nama_perusahaan: string;
+  nama_pic: string;
+  email: string;
+  whatsapp: string;
+  produk: string;
+  catatan?: string;
+  bukti_url?: string;
+  bukti_filename?: string;
+  status: OrderStatus;
+}
+
+const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; icon: React.ReactNode }> = {
+  baru: { label: 'Baru', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: <AlertCircle className="w-3.5 h-3.5" /> },
+  diproses: { label: 'Diproses', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <Clock className="w-3.5 h-3.5" /> },
+  selesai: { label: 'Selesai', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
+  dibatalkan: { label: 'Dibatalkan', color: 'bg-red-100 text-red-700 border-red-200', icon: <XCircle className="w-3.5 h-3.5" /> },
+};
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function waLink(phone: string) {
+  return `https://wa.me/${phone.replace(/\D/g, '')}`;
+}
+
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }: { onLogin: (passcode: string) => void }) {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/admin/orders`, {
+        headers: { 'x-admin-passcode': input },
+      });
+      if (res.status === 401) {
+        setError('Passcode salah. Coba lagi.');
+      } else if (res.ok) {
+        onLogin(input);
+      } else {
+        setError('Terjadi kesalahan server. Coba lagi.');
+      }
+    } catch {
+      setError('Tidak dapat terhubung ke server.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-full p-4">
+            <Lock className="w-8 h-8 text-amber-400" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-xl font-bold text-white">Admin DokumenProyek</h1>
+            <p className="text-slate-400 text-sm mt-1">Masukkan passcode untuk lanjut</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="password"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="Passcode admin"
+            autoFocus
+            className="w-full bg-slate-700 border border-slate-600 text-white placeholder-slate-400 rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+          />
+          {error && (
+            <p className="text-red-400 text-sm flex items-center gap-1.5">
+              <XCircle className="w-4 h-4 flex-shrink-0" /> {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={loading || !input}
+            className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-bold py-3 rounded-lg transition-colors"
+          >
+            {loading ? 'Memeriksa…' : 'Masuk'}
+          </button>
+        </form>
+
+        <p className="text-center mt-6">
+          <a href={import.meta.env.BASE_URL} className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
+            ← Kembali ke Simulator
+          </a>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: OrderStatus }) {
+  const cfg = STATUS_CONFIG[status];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${cfg.color}`}>
+      {cfg.icon} {cfg.label}
+    </span>
+  );
+}
+
+// ─── Order Row ────────────────────────────────────────────────────────────────
+function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: string; onUpdated: (updated: Order) => void }) {
+  const [updating, setUpdating] = useState(false);
+
+  const updateStatus = async (newStatus: OrderStatus) => {
+    if (newStatus === order.status) return;
+    setUpdating(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/orders/${order.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-passcode': passcode },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        onUpdated(updated);
+      }
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-slate-900">{order.nama_perusahaan}</span>
+            <StatusBadge status={order.status} />
+          </div>
+          <p className="text-slate-500 text-sm mt-0.5">
+            #{order.id.slice(0, 8).toUpperCase()} · {formatDate(order.created_at)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Chat WA */}
+          <a
+            href={waLink(order.whatsapp)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <MessageCircle className="w-4 h-4" /> Chat WA
+          </a>
+          {/* Bukti bayar */}
+          {order.bukti_url && (
+            <a
+              href={order.bukti_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" /> Bukti
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Detail */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm mb-4">
+        <div><span className="text-slate-400">PIC:</span> <span className="text-slate-700">{order.nama_pic}</span></div>
+        <div><span className="text-slate-400">Email:</span> <span className="text-slate-700">{order.email}</span></div>
+        <div><span className="text-slate-400">WA:</span> <span className="text-slate-700">{order.whatsapp}</span></div>
+        <div className="col-span-2 sm:col-span-1"><span className="text-slate-400">Produk:</span> <span className="text-slate-700 font-medium">{order.produk}</span></div>
+        {order.catatan && (
+          <div className="col-span-2 sm:col-span-3"><span className="text-slate-400">Catatan:</span> <span className="text-slate-600 italic">{order.catatan}</span></div>
+        )}
+        {!order.bukti_url && order.bukti_filename && (
+          <div className="col-span-2 sm:col-span-3"><span className="text-slate-400">File Bukti:</span> <span className="text-slate-500 text-xs">{order.bukti_filename} (belum di-upload ke storage)</span></div>
+        )}
+      </div>
+
+      {/* Status selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-slate-400 text-sm">Ubah status:</span>
+        <div className="relative">
+          <select
+            value={order.status}
+            onChange={e => updateStatus(e.target.value as OrderStatus)}
+            disabled={updating}
+            className="appearance-none bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:border-amber-500 cursor-pointer disabled:opacity-60"
+          >
+            {Object.entries(STATUS_CONFIG).map(([val, cfg]) => (
+              <option key={val} value={val}>{cfg.label}</option>
+            ))}
+          </select>
+          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
+        {updating && <RefreshCw className="w-4 h-4 text-slate-400 animate-spin" />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+function Dashboard({ passcode }: { passcode: string }) {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState<OrderStatus | 'semua'>('semua');
+
+  const fetchOrders = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/admin/orders`, {
+        headers: { 'x-admin-passcode': passcode },
+      });
+      if (!res.ok) throw new Error('Gagal memuat data');
+      setOrders(await res.json());
+    } catch (e: any) {
+      setError(e.message ?? 'Terjadi kesalahan');
+    } finally {
+      setLoading(false);
+    }
+  }, [passcode]);
+
+  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  const handleUpdated = (updated: Order) => {
+    setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
+  };
+
+  const filtered = filter === 'semua' ? orders : orders.filter(o => o.status === filter);
+
+  const counts = orders.reduce(
+    (acc, o) => { acc[o.status] = (acc[o.status] ?? 0) + 1; return acc; },
+    {} as Record<string, number>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <div className="bg-slate-900 text-white py-5 px-4 shadow-lg">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold">Dashboard Pesanan</h1>
+            <p className="text-slate-400 text-sm">DokumenProyek Admin</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={fetchOrders}
+              className="inline-flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            </button>
+            <a
+              href={import.meta.env.BASE_URL}
+              className="text-slate-400 hover:text-white text-sm transition-colors"
+            >
+              ← Simulator
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {([
+            ['semua', 'Total', orders.length, 'bg-slate-700 text-white'],
+            ['baru', 'Baru', counts.baru ?? 0, 'bg-blue-500 text-white'],
+            ['diproses', 'Diproses', counts.diproses ?? 0, 'bg-amber-500 text-white'],
+            ['selesai', 'Selesai', counts.selesai ?? 0, 'bg-emerald-500 text-white'],
+          ] as const).map(([val, label, count, color]) => (
+            <button
+              key={val}
+              onClick={() => setFilter(val as any)}
+              className={`rounded-xl p-4 text-left transition-all hover:opacity-90 ${color} ${filter === val ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-50' : ''}`}
+            >
+              <p className="text-3xl font-black">{count}</p>
+              <p className="text-sm font-medium opacity-90">{label}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Orders list */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" /> {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+            <RefreshCw className="w-8 h-8 animate-spin" />
+            <p>Memuat pesanan…</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+            <Package className="w-10 h-10 opacity-40" />
+            <p className="font-medium">Belum ada pesanan{filter !== 'semua' ? ` dengan status "${STATUS_CONFIG[filter as OrderStatus]?.label}"` : ''}</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map(order => (
+              <OrderRow key={order.id} order={order} passcode={passcode} onUpdated={handleUpdated} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Page root ────────────────────────────────────────────────────────────────
+export default function AdminPesanan() {
+  const [passcode, setPasscode] = useState<string | null>(
+    sessionStorage.getItem('dp_admin_pc')
+  );
+
+  const handleLogin = (pc: string) => {
+    sessionStorage.setItem('dp_admin_pc', pc);
+    setPasscode(pc);
+  };
+
+  if (!passcode) return <LoginScreen onLogin={handleLogin} />;
+  return <Dashboard passcode={passcode} />;
+}
