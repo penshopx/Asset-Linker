@@ -5,6 +5,8 @@ import { calculateScore, THRESHOLDS, WEIGHTS, getLowestIndicators, getGrade } fr
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 import { AlertTriangle, Download, Share2, ArrowRight, RefreshCw, Trophy, Target } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const getActionContent = (key: string) => {
   if (['gcgYears', 'certificates', 'awards'].includes(key)) {
@@ -142,11 +144,181 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
 
   const needsPUB = ['B', 'C', 'D'].includes(grade);
 
-  const handleSoon = () => {
-    toast({
-      title: "Fitur segera hadir",
-      description: "Nantikan pembaruan kami berikutnya.",
+  const INDICATOR_NAMES: Record<string, string> = {
+    assetGrowth: 'Pertumbuhan Aset',
+    gpm: 'Gross Profit Margin',
+    assetTurnover: 'Perputaran Aset',
+    currentRatio: 'Current Ratio',
+    der: 'DER',
+    fcf: 'Arus Kas Bebas',
+    gcgYears: 'Tahun GCG',
+    certificates: 'Sertifikasi',
+    awards: 'Penghargaan',
+    moSupplyChain: 'MO: Supply Chain',
+    moMaterialQuality: 'MO: Kualitas Material',
+    moEquipmentQuality: 'MO: Kualitas Peralatan',
+    moK3: 'MO: K3',
+    moProcedures: 'MO: Prosedur',
+    moResultQuality: 'MO: Kualitas Hasil',
+    moOM: 'MO: Operasi & Maintenance',
+    moSocialProtection: 'MO: Perlindungan Sosial',
+    moEnvironment: 'MO: Lingkungan',
+    equipmentRatio: 'Rasio Peralatan',
+    equipmentNewness: 'Kebaruan Peralatan',
+    hrProductivity: 'Produktivitas SDM',
+    hrEmpowerment: 'Pemberdayaan SDM',
+    companyCapacity: 'Kapasitas Perusahaan',
+  };
+
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 18;
+    let y = margin;
+
+    // Header
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageW, 32, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Laporan Hasil LKUT', margin, 14);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Kualifikasi: ${data.kualifikasi || '-'}`, margin, 22);
+    doc.text(`Tanggal: ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}`, pageW - margin, 22, { align: 'right' });
+
+    y = 42;
+
+    // Score summary box
+    doc.setFillColor(245, 247, 250);
+    doc.roundedRect(margin, y, pageW - margin * 2, 28, 3, 3, 'F');
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Skor Akhir LKUT', margin + 6, y + 9);
+    doc.setFontSize(24);
+    const gradeColor = grade.includes('A') ? [16, 185, 129] : grade.includes('B') || grade.includes('C') ? [245, 158, 11] : [239, 68, 68];
+    doc.setTextColor(gradeColor[0], gradeColor[1], gradeColor[2]);
+    doc.text(`${finalScore.toFixed(1)}`, margin + 6, y + 21);
+    doc.setFontSize(14);
+    doc.text(`Grade ${grade}`, margin + 38, y + 21);
+    doc.setTextColor(15, 23, 42);
+
+    y += 36;
+
+    // Score breakdown table
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('Rincian Komponen Skor', margin, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Komponen', 'Skor', 'Bobot']],
+      body: [
+        ['Keuangan', `${financialScore.toFixed(1)} / 100`, '18%'],
+        ['Organisasi & Manajemen', `${orgScore.toFixed(1)} / 100`, '42%'],
+        ['Proyek', `${projectScore.toFixed(1)} / 100`, '40%'],
+        ['Skor Akhir', `${finalScore.toFixed(1)} / 100`, '100%'],
+      ],
+      margin: { left: margin, right: margin },
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+      bodyStyles: { textColor: [30, 41, 59] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      styles: { fontSize: 10, cellPadding: 3 },
+      didParseCell: (data) => {
+        if (data.row.index === 3) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [226, 232, 240];
+        }
+      },
     });
+
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // Lowest indicators
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('Prioritas Perbaikan (3 Indikator Terendah)', margin, y);
+    y += 4;
+
+    const lowestRows = lowestKeys.map((key, idx) => {
+      const action = getActionContent(key);
+      const score = indicatorScores[key as keyof typeof indicatorScores];
+      return [
+        `#${idx + 1} — ${INDICATOR_NAMES[key] || key}`,
+        `${score.toFixed(1)} / 100`,
+        action.title,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Indikator', 'Skor', 'Rekomendasi']],
+      body: lowestRows,
+      margin: { left: margin, right: margin },
+      headStyles: { fillColor: [239, 68, 68], textColor: [255, 255, 255], fontStyle: 'bold' },
+      bodyStyles: { textColor: [30, 41, 59] },
+      alternateRowStyles: { fillColor: [255, 241, 242] },
+      styles: { fontSize: 10, cellPadding: 3 },
+      columnStyles: { 2: { cellWidth: 80 } },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // PUB warning if needed
+    if (needsPUB) {
+      doc.setFillColor(254, 242, 242);
+      doc.setDrawColor(239, 68, 68);
+      doc.roundedRect(margin, y, pageW - margin * 2, 18, 2, 2, 'FD');
+      doc.setTextColor(153, 27, 27);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('⚠ PERINGATAN: Grade di bawah A — Wajib mengikuti PUB Khusus sesuai Permen PUPR 7/2024.', margin + 4, y + 7);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Konsultasi: https://dokumenproyek.com', margin + 4, y + 13);
+    }
+
+    // Footer
+    const pageH = doc.internal.pageSize.getHeight();
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Dihasilkan oleh Simulator LKUT — dokumenproyek.com', pageW / 2, pageH - 8, { align: 'center' });
+
+    doc.save(`Laporan-LKUT-Grade-${grade}-${new Date().toISOString().slice(0, 10)}.pdf`);
+
+    toast({ title: "PDF berhasil diunduh", description: `Laporan LKUT Grade ${grade} telah disimpan.` });
+  };
+
+  const handleWhatsApp = () => {
+    const lowestSummary = lowestKeys
+      .map((key, idx) => `  ${idx + 1}. ${INDICATOR_NAMES[key] || key} (${indicatorScores[key as keyof typeof indicatorScores].toFixed(1)}/100)`)
+      .join('\n');
+
+    const text = [
+      `📊 *Hasil Simulasi LKUT*`,
+      `Kualifikasi: ${data.kualifikasi || '-'}`,
+      ``,
+      `🏆 *Skor Akhir: ${finalScore.toFixed(1)} / 100*`,
+      `🎖️ *Grade: ${grade}*`,
+      ``,
+      `📋 *Rincian Komponen:*`,
+      `• Keuangan: ${financialScore.toFixed(1)} / 100`,
+      `• Organisasi & Manajemen: ${orgScore.toFixed(1)} / 100`,
+      `• Proyek: ${projectScore.toFixed(1)} / 100`,
+      ``,
+      `⚠️ *Prioritas Perbaikan:*`,
+      lowestSummary,
+      ``,
+      `Cek simulasi lengkap di: https://dokumenproyek.com`,
+    ].join('\n');
+
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -255,14 +427,14 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
           Hitung Ulang
         </button>
         <button 
-          onClick={handleSoon}
+          onClick={handleDownloadPDF}
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-white bg-slate-800 hover:bg-slate-700 shadow-sm transition-all"
         >
           <Download className="w-4 h-4" />
           Download Hasil (PDF)
         </button>
         <button 
-          onClick={handleSoon}
+          onClick={handleWhatsApp}
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-slate-900 bg-green-500 hover:bg-green-400 shadow-sm transition-all"
         >
           <Share2 className="w-4 h-4" />
