@@ -279,7 +279,7 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
       doc.setFont('helvetica', 'bold');
       doc.text('⚠ PERINGATAN: Grade di bawah A — Wajib mengikuti PUB Khusus sesuai Permen PUPR 7/2024.', margin + 4, y + 7);
       doc.setFont('helvetica', 'normal');
-      doc.text('Konsultasi: https://dokumenproyek.com', margin + 4, y + 13);
+      doc.text('Konsultasi: https://dp.dokumenproyek.com', margin + 4, y + 13);
     }
 
     // Footer

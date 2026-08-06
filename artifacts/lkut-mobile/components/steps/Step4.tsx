@@ -245,14 +245,14 @@ export function Step4({ onReset }: Step4Props) {
           <Text style={[styles.ctaBtnText, { color: colors.foreground }]}>Hitung Ulang</Text>
         </Pressable>
         <Pressable
-          onPress={() => openURL('https://dokumenproyek.com')}
+          onPress={() => openURL('https://dp.dokumenproyek.com')}
           style={({ pressed }) => [
             styles.ctaBtn,
             { backgroundColor: pressed ? '#1e293b' : colors.primary, borderColor: colors.primary, borderRadius: colors.radius, flex: 1 },
           ]}
         >
           <Ionicons name="globe-outline" size={16} color="#fff" />
-          <Text style={[styles.ctaBtnText, { color: '#fff' }]}>dokumenproyek.com</Text>
+          <Text style={[styles.ctaBtnText, { color: '#fff' }]}>dp.dokumenproyek.com</Text>
         </Pressable>
       </View>
     </View>
