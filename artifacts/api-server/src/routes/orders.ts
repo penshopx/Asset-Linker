@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { supabase } from "../lib/supabase";
-import { sendOrderNotification } from "../lib/mailer";
+import { sendOrderNotification, sendBuyerConfirmation } from "../lib/mailer";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -76,7 +76,7 @@ router.post(
       return res.status(500).json({ error: "Gagal menyimpan pesanan. Coba lagi." });
     }
 
-    // Send email notification (best-effort)
+    // Send email notification to admin (best-effort)
     sendOrderNotification({
       orderId: order.id,
       namaPerusahaan: nama_perusahaan,
@@ -87,6 +87,18 @@ router.post(
       catatan,
       buktUrl: buktUrl ?? undefined,
     }).catch((e) => console.error("[orders] Email notification error:", e));
+
+    // Send confirmation email to buyer (best-effort)
+    sendBuyerConfirmation({
+      orderId: order.id,
+      namaPerusahaan: nama_perusahaan,
+      namaPic: nama_pic,
+      email,
+      whatsapp,
+      produk,
+      catatan,
+      buktUrl: buktUrl ?? undefined,
+    }).catch((e) => console.error("[orders] Buyer confirmation email error:", e));
 
     return res.status(201).json({ ok: true, order_id: order.id });
   }

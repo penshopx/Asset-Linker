@@ -17,6 +17,99 @@ export interface OrderEmailData {
   buktUrl?: string;
 }
 
+/** Escape characters that have special meaning in HTML text content. */
+function esc(value: string | undefined | null): string {
+  if (!value) return "";
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Validate that a URL is http/https before inserting it into an href attribute. */
+function safeUrl(url: string | undefined | null): string {
+  if (!url) return "#";
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return url;
+  } catch {
+    // fall through
+  }
+  return "#";
+}
+
+/** Send and throw if Resend returns an error result (not just a rejected promise). */
+async function sendOrThrow(
+  payload: Parameters<Resend["emails"]["send"]>[0]
+): Promise<void> {
+  const { data, error } = await resend!.emails.send(payload);
+  if (error) {
+    throw new Error(`Resend error: ${error.message ?? JSON.stringify(error)}`);
+  }
+  if (!data?.id) {
+    throw new Error("Resend returned no email ID and no error — unexpected response");
+  }
+}
+
+export async function sendBuyerConfirmation(data: OrderEmailData): Promise<void> {
+  if (!resend) {
+    console.warn("[mailer] Skipping buyer confirmation — RESEND_API_KEY not set");
+    return;
+  }
+
+  const shortId = `#${data.orderId.slice(0, 8).toUpperCase()}`;
+
+  await sendOrThrow({
+    from: "DokumenProyek <noreply@dokumenproyek.com>",
+    to: data.email,
+    subject: `✅ Pesanan Anda Diterima — ${esc(data.produk)} (${shortId})`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #0f172a;">
+        <div style="background: #f59e0b; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; color: #0f172a; font-size: 22px;">DokumenProyek</h1>
+        </div>
+        <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <h2 style="margin-top: 0; color: #0f172a;">Pesanan Anda Berhasil Diterima 🎉</h2>
+          <p style="color: #475569;">Halo <strong>${esc(data.namaPic)}</strong>,</p>
+          <p style="color: #475569;">Terima kasih telah memesan melalui <strong>DokumenProyek</strong>. Pesanan Anda telah kami terima dan sedang dalam proses penanganan.</p>
+
+          <div style="background: #f8fafc; border-radius: 8px; padding: 20px; margin: 24px 0;">
+            <h3 style="margin-top: 0; color: #0f172a; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;">Detail Pesanan</h3>
+            <table style="width:100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; width: 140px;">ID Pesanan</td>
+                <td style="padding: 6px 0; font-weight: 600;">${esc(shortId)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Nama Perusahaan</td>
+                <td style="padding: 6px 0;">${esc(data.namaPerusahaan)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Produk</td>
+                <td style="padding: 6px 0; font-weight: 600;">${esc(data.produk)}</td>
+              </tr>
+              ${data.catatan ? `<tr><td style="padding: 6px 0; color: #64748b;">Catatan</td><td style="padding: 6px 0;">${esc(data.catatan)}</td></tr>` : ""}
+            </table>
+          </div>
+
+          <div style="background: #fefce8; border-left: 4px solid #f59e0b; padding: 16px 20px; border-radius: 0 8px 8px 0; margin: 24px 0;">
+            <p style="margin: 0; color: #78350f; font-weight: 600;">⏱ Estimasi Tindak Lanjut</p>
+            <p style="margin: 8px 0 0; color: #92400e;">Tim kami akan menghubungi Anda dalam <strong>1×24 jam</strong> melalui WhatsApp atau email untuk konfirmasi lebih lanjut.</p>
+          </div>
+
+          <p style="color: #475569; margin-top: 24px;">Jika Anda memiliki pertanyaan, jangan ragu untuk menghubungi kami.</p>
+          <p style="color: #475569; margin-bottom: 0;">Salam,<br/><strong>Tim DokumenProyek</strong></p>
+        </div>
+        <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 16px;">
+          Email ini dikirim secara otomatis. Mohon tidak membalas email ini.
+        </p>
+      </div>
+    `,
+  });
+}
+
 export async function sendOrderNotification(data: OrderEmailData): Promise<void> {
   const adminEmail = process.env["ADMIN_EMAIL"];
 
@@ -29,31 +122,28 @@ export async function sendOrderNotification(data: OrderEmailData): Promise<void>
 
   const waLink = `https://wa.me/${data.whatsapp.replace(/\D/g, "")}`;
 
-  await resend.emails.send({
+  await sendOrThrow({
     from: "DokumenProyek <noreply@dokumenproyek.com>",
     to: adminEmail,
-    subject: `📦 Pesanan Baru: ${data.produk} — ${data.namaPerusahaan}`,
+    subject: `📦 Pesanan Baru: ${esc(data.produk)} — ${esc(data.namaPerusahaan)}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #0f172a; border-bottom: 2px solid #f59e0b; padding-bottom: 8px;">
           Pesanan Baru Masuk
         </h2>
         <table style="width:100%; border-collapse: collapse; margin-top: 16px;">
-          <tr><td style="padding:8px; color:#64748b; width:160px;">ID Pesanan</td><td style="padding:8px; font-weight:600;">#${data.orderId.slice(0, 8).toUpperCase()}</td></tr>
-          <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Nama Perusahaan</td><td style="padding:8px;">${data.namaPerusahaan}</td></tr>
-          <tr><td style="padding:8px; color:#64748b;">Nama PIC</td><td style="padding:8px;">${data.namaPic}</td></tr>
-          <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Email</td><td style="padding:8px;">${data.email}</td></tr>
-          <tr><td style="padding:8px; color:#64748b;">WhatsApp</td><td style="padding:8px;"><a href="${waLink}">${data.whatsapp}</a></td></tr>
-          <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Produk</td><td style="padding:8px; font-weight:600;">${data.produk}</td></tr>
-          ${data.catatan ? `<tr><td style="padding:8px; color:#64748b;">Catatan</td><td style="padding:8px;">${data.catatan}</td></tr>` : ""}
-          ${data.buktUrl ? `<tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Bukti Bayar</td><td style="padding:8px;"><a href="${data.buktUrl}">Lihat File</a></td></tr>` : ""}
+          <tr><td style="padding:8px; color:#64748b; width:160px;">ID Pesanan</td><td style="padding:8px; font-weight:600;">#${esc(data.orderId.slice(0, 8).toUpperCase())}</td></tr>
+          <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Nama Perusahaan</td><td style="padding:8px;">${esc(data.namaPerusahaan)}</td></tr>
+          <tr><td style="padding:8px; color:#64748b;">Nama PIC</td><td style="padding:8px;">${esc(data.namaPic)}</td></tr>
+          <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Email</td><td style="padding:8px;">${esc(data.email)}</td></tr>
+          <tr><td style="padding:8px; color:#64748b;">WhatsApp</td><td style="padding:8px;"><a href="${esc(waLink)}">${esc(data.whatsapp)}</a></td></tr>
+          <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Produk</td><td style="padding:8px; font-weight:600;">${esc(data.produk)}</td></tr>
+          ${data.catatan ? `<tr><td style="padding:8px; color:#64748b;">Catatan</td><td style="padding:8px;">${esc(data.catatan)}</td></tr>` : ""}
+          ${data.buktUrl ? `<tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Bukti Bayar</td><td style="padding:8px;"><a href="${esc(safeUrl(data.buktUrl))}">Lihat File</a></td></tr>` : ""}
         </table>
         <div style="margin-top: 24px;">
-          <a href="${waLink}" style="background:#22c55e; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600; display:inline-block;">
+          <a href="${esc(waLink)}" style="background:#22c55e; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600; display:inline-block;">
             Chat WhatsApp PIC
-          </a>
-          <a href="${process.env["ADMIN_EMAIL"] ? "" : "#"}" style="background:#0f172a; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600; display:inline-block; margin-left:12px;">
-            Buka Dashboard Admin
           </a>
         </div>
       </div>
