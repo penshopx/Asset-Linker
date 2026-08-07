@@ -2,11 +2,52 @@ import React from 'react';
 import { useFormContext } from 'react-hook-form';
 import { LkutFormData } from '@/types/lkut';
 import { calculateScore, THRESHOLDS, WEIGHTS, getLowestIndicators, getGrade } from '@/lib/lkutCalculator';
+import { getSalesAlerts, TriggerAlert } from '@/lib/salesEngine';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
-import { AlertTriangle, Download, Share2, ArrowRight, RefreshCw, Trophy, Target } from 'lucide-react';
+import { AlertTriangle, Download, Share2, ArrowRight, RefreshCw, Trophy, Target, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+// ─── Sales Alert Card ────────────────────────────────────────────────────────
+function SalesAlertCard({ alert }: { alert: TriggerAlert }) {
+  const isCritical = alert.severity === 'critical';
+  const border = isCritical ? 'border-red-400 bg-red-50' : 'border-amber-400 bg-amber-50';
+  const titleColor = isCritical ? 'text-red-900' : 'text-amber-900';
+  const bodyColor = isCritical ? 'text-red-800' : 'text-amber-800';
+  const strip = isCritical ? 'bg-red-500' : 'bg-amber-500';
+  const primaryBtn = isCritical
+    ? 'bg-red-600 hover:bg-red-700 text-white'
+    : 'bg-amber-500 hover:bg-amber-400 text-slate-900';
+  const secondaryBtn = isCritical
+    ? 'bg-white border border-red-400 text-red-700 hover:bg-red-50'
+    : 'bg-white border border-amber-400 text-amber-800 hover:bg-amber-50';
+
+  return (
+    <div className={`flex rounded-xl border overflow-hidden shadow-sm ${border}`}>
+      {/* Colored left strip */}
+      <div className={`w-1.5 shrink-0 ${strip}`} />
+      <div className="flex-1 p-5">
+        <h4 className={`font-bold text-base mb-1 ${titleColor}`}>{alert.title}</h4>
+        <p className={`text-sm mb-4 ${bodyColor}`}>{alert.body}</p>
+        <div className="flex flex-wrap gap-2">
+          {alert.products.map((p, i) => (
+            <a
+              key={i}
+              href={p.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${p.primary ? primaryBtn : secondaryBtn}`}
+            >
+              {p.label}
+              <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const getActionContent = (key: string) => {
   if (['gcgYears', 'certificates', 'awards'].includes(key)) {
@@ -135,7 +176,8 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
   const grade = getGrade(finalScore);
 
   const lowestKeys = getLowestIndicators(indicatorScores, 3);
-  
+  const salesAlerts = getSalesAlerts(data, indicatorScores);
+
   const chartData = [
     { name: 'Keuangan', score: parseFloat(financialScore.toFixed(1)), weight: 'Bobot: 18%', color: '#f59e0b' },
     { name: 'Organisasi', score: parseFloat(orgScore.toFixed(1)), weight: 'Bobot: 42%', color: '#0f172a' },
@@ -340,6 +382,19 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
           >
             Konsultasi Solusi PUB Sekarang
           </a>
+        </div>
+      )}
+
+      {/* ── Sales Alert Cards ──────────────────────────────────────── */}
+      {salesAlerts.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-base font-bold text-slate-700 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            Rekomendasi Solusi untuk Perusahaan Anda
+          </h3>
+          {salesAlerts.map(alert => (
+            <SalesAlertCard key={alert.id} alert={alert} />
+          ))}
         </div>
       )}
 

@@ -17,7 +17,9 @@ const defaultValues: LkutFormData = {
   moSupplyChain: 10, moMaterialQuality: 10, moEquipmentQuality: 10, moK3: 10, moProcedures: 10, moResultQuality: 10, moOM: 10, moSocialProtection: 10, moEnvironment: 10,
   equipmentRatio: 1.5, equipmentNewness: 30,
   hrProductivity: 2200, hrEmpowerment: 35, companyCapacity: 8,
-  projectScore: 75
+  projectScore: 75,
+  skkMonthsLeft: undefined,
+  hasSmap: undefined,
 };
 
 export default function Simulator() {

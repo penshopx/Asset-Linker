@@ -33,4 +33,8 @@ export interface LkutFormData {
   
   // Proyek
   projectScore: number;
+
+  // Konteks tambahan untuk engine rekomendasi
+  skkMonthsLeft?: number;   // Bulan tersisa sebelum SKK expired
+  hasSmap?: boolean;        // Apakah perusahaan sudah punya dokumen SMAP
 }
