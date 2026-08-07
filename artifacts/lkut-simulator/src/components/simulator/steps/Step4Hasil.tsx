@@ -1,16 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { LkutFormData } from '@/types/lkut';
 import { calculateScore, THRESHOLDS, WEIGHTS, getLowestIndicators, getGrade } from '@/lib/lkutCalculator';
 import { getSalesAlerts, TriggerAlert } from '@/lib/salesEngine';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
-import { AlertTriangle, Download, Share2, ArrowRight, RefreshCw, Trophy, Target, ExternalLink } from 'lucide-react';
+import { AlertTriangle, Download, Share2, ArrowRight, RefreshCw, Trophy, Target, ExternalLink, ShoppingCart } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { KonfirmasiPesananModal } from '../KonfirmasiPesananModal';
 
 // ─── Sales Alert Card ────────────────────────────────────────────────────────
-function SalesAlertCard({ alert }: { alert: TriggerAlert }) {
+function SalesAlertCard({ alert, onOrder }: { alert: TriggerAlert; onOrder: (produk: string) => void }) {
   const isCritical = alert.severity === 'critical';
   const border = isCritical ? 'border-red-400 bg-red-50' : 'border-amber-400 bg-amber-50';
   const titleColor = isCritical ? 'text-red-900' : 'text-amber-900';
@@ -23,6 +24,8 @@ function SalesAlertCard({ alert }: { alert: TriggerAlert }) {
     ? 'bg-white border border-red-400 text-red-700 hover:bg-red-50'
     : 'bg-white border border-amber-400 text-amber-800 hover:bg-amber-50';
 
+  const primaryProduct = alert.products.find(p => p.primary) ?? alert.products[0];
+
   return (
     <div className={`flex rounded-xl border overflow-hidden shadow-sm ${border}`}>
       {/* Colored left strip */}
@@ -30,7 +33,7 @@ function SalesAlertCard({ alert }: { alert: TriggerAlert }) {
       <div className="flex-1 p-5">
         <h4 className={`font-bold text-base mb-1 ${titleColor}`}>{alert.title}</h4>
         <p className={`text-sm mb-4 ${bodyColor}`}>{alert.body}</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           {alert.products.map((p, i) => (
             <a
               key={i}
@@ -43,6 +46,17 @@ function SalesAlertCard({ alert }: { alert: TriggerAlert }) {
               <ExternalLink className="w-3.5 h-3.5 opacity-70" />
             </a>
           ))}
+          <button
+            onClick={() => onOrder(primaryProduct?.label ?? alert.title)}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border ${
+              isCritical
+                ? 'bg-white border-red-300 text-red-700 hover:bg-red-600 hover:text-white hover:border-red-600'
+                : 'bg-white border-amber-300 text-amber-800 hover:bg-amber-500 hover:text-slate-900 hover:border-amber-500'
+            }`}
+          >
+            <ShoppingCart className="w-3.5 h-3.5" />
+            Pesan Sekarang
+          </button>
         </div>
       </div>
     </div>
@@ -110,6 +124,14 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
   const { watch } = useFormContext<LkutFormData>();
   const data = watch();
   const { toast } = useToast();
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [defaultProduk, setDefaultProduk] = useState('');
+
+  const openOrder = (produk: string) => {
+    setDefaultProduk(produk);
+    setModalOpen(true);
+  };
 
   const indicatorScores = {
     assetGrowth: calculateScore(data.assetGrowth || 0, THRESHOLDS.assetGrowth),
@@ -393,7 +415,7 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
             Rekomendasi Solusi untuk Perusahaan Anda
           </h3>
           {salesAlerts.map(alert => (
-            <SalesAlertCard key={alert.id} alert={alert} />
+            <SalesAlertCard key={alert.id} alert={alert} onOrder={openOrder} />
           ))}
         </div>
       )}
@@ -473,7 +495,22 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-6 pb-2">
+      {/* ── Konfirmasi Pesanan CTA ──────────────────────────────────── */}
+      <div className="bg-gradient-to-r from-amber-500 to-amber-400 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md">
+        <div>
+          <h3 className="font-bold text-slate-900 text-lg">Siap Tingkatkan Nilai LKUT Anda?</h3>
+          <p className="text-slate-800 text-sm mt-0.5">Pesan layanan konsultasi atau dokumen langsung dari sini — tanpa perlu chat WA dulu.</p>
+        </div>
+        <button
+          onClick={() => openOrder('')}
+          className="shrink-0 inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white font-bold px-6 py-3 rounded-xl transition-colors shadow-sm text-sm w-full sm:w-auto justify-center"
+        >
+          <ShoppingCart className="w-4 h-4" />
+          Konfirmasi Pesanan
+        </button>
+      </div>
+
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2 pb-2">
         <button 
           onClick={onReset}
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 shadow-sm transition-all"
@@ -496,6 +533,13 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
           Bagikan ke WhatsApp
         </button>
       </div>
+
+      {/* ── Order Modal ─────────────────────────────────────────────── */}
+      <KonfirmasiPesananModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        defaultProduk={defaultProduk}
+      />
 
     </div>
   );
