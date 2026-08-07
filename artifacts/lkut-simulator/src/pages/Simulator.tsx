@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ShieldCheck, Crosshair } from 'lucide-react';
 import { LkutFormData } from '@/types/lkut';
+import { captureFromURL, SniperAttribution } from '@/lib/sniper';
 
 import { StepIndicator } from '@/components/simulator/StepIndicator';
 import { Step1Keuangan } from '@/components/simulator/steps/Step1Keuangan';
@@ -25,6 +26,11 @@ const defaultValues: LkutFormData = {
 export default function Simulator() {
   const methods = useForm<LkutFormData>({ defaultValues });
   const [step, setStep] = useState(1);
+  const [attribution, setAttribution] = useState<SniperAttribution | null>(null);
+
+  useEffect(() => {
+    setAttribution(captureFromURL());
+  }, []);
 
   const STEP_FIELDS: Record<number, (keyof LkutFormData)[]> = {
     1: ['assetGrowth', 'gpm', 'assetTurnover', 'currentRatio', 'der', 'fcf'],
@@ -69,6 +75,19 @@ export default function Simulator() {
       <main className="pb-24">
         <StepIndicator currentStep={step} />
 
+        {/* ── Sniper attribution banner ─────────────────────────────── */}
+        {attribution && (
+          <div className="max-w-4xl mx-auto px-4 mt-4">
+            <div className="bg-blue-950 border border-blue-800 text-white rounded-xl px-5 py-3 flex items-center gap-3 shadow-sm">
+              <Crosshair className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="text-sm font-medium text-blue-100">
+                🔍 Diagnosa Lanjutan dari Intel-Konstruksi untuk{' '}
+                <span className="font-bold text-white">{attribution.pt}</span>
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="max-w-4xl mx-auto px-4">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-10 min-h-[500px] flex flex-col">
             <FormProvider {...methods}>
@@ -85,7 +104,7 @@ export default function Simulator() {
                       {step === 1 && <Step1Keuangan />}
                       {step === 2 && <Step2Organisasi />}
                       {step === 3 && <Step3ProyekStep />}
-                      {step === 4 && <Step4Hasil onReset={() => setStep(1)} />}
+                      {step === 4 && <Step4Hasil onReset={() => setStep(1)} attribution={attribution} />}
                     </motion.div>
                   </AnimatePresence>
                 </div>

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { LkutFormData } from '@/types/lkut';
 import { calculateScore, THRESHOLDS, WEIGHTS, getLowestIndicators, getGrade } from '@/lib/lkutCalculator';
 import { getSalesAlerts, TriggerAlert } from '@/lib/salesEngine';
+import { SniperAttribution, fireWebhook, appendRef } from '@/lib/sniper';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 import { AlertTriangle, Download, Share2, ArrowRight, RefreshCw, Trophy, Target, ExternalLink, ShoppingCart } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -11,7 +12,7 @@ import autoTable from 'jspdf-autotable';
 import { KonfirmasiPesananModal } from '../KonfirmasiPesananModal';
 
 // ─── Sales Alert Card ────────────────────────────────────────────────────────
-function SalesAlertCard({ alert, onOrder }: { alert: TriggerAlert; onOrder: (produk: string) => void }) {
+function SalesAlertCard({ alert, onOrder, applyRef }: { alert: TriggerAlert; onOrder: (produk: string) => void; applyRef: (url: string) => string }) {
   const isCritical = alert.severity === 'critical';
   const border = isCritical ? 'border-red-400 bg-red-50' : 'border-amber-400 bg-amber-50';
   const titleColor = isCritical ? 'text-red-900' : 'text-amber-900';
@@ -37,7 +38,7 @@ function SalesAlertCard({ alert, onOrder }: { alert: TriggerAlert; onOrder: (pro
           {alert.products.map((p, i) => (
             <a
               key={i}
-              href={p.href}
+              href={applyRef(p.href)}
               target="_blank"
               rel="noopener noreferrer"
               className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${p.primary ? primaryBtn : secondaryBtn}`}
@@ -120,13 +121,14 @@ const Gauge = ({ score, grade }: { score: number, grade: string }) => {
   );
 }
 
-export function Step4Hasil({ onReset }: { onReset: () => void }) {
+export function Step4Hasil({ onReset, attribution }: { onReset: () => void; attribution?: SniperAttribution | null }) {
   const { watch } = useFormContext<LkutFormData>();
   const data = watch();
   const { toast } = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [defaultProduk, setDefaultProduk] = useState('');
+  const webhookFired = useRef(false);
 
   const openOrder = (produk: string) => {
     setDefaultProduk(produk);
@@ -199,6 +201,18 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
 
   const lowestKeys = getLowestIndicators(indicatorScores, 3);
   const salesAlerts = getSalesAlerts(data, indicatorScores);
+
+  // ─── Sniper attribution ────────────────────────────────────────────────────
+  const applyRef = (url: string) =>
+    attribution?.pt ? appendRef(url, attribution.pt) : url;
+
+  useEffect(() => {
+    if (!webhookFired.current && attribution?.pt) {
+      webhookFired.current = true;
+      fireWebhook(attribution.pt, attribution.tag ?? '', grade);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const chartData = [
     { name: 'Keuangan', score: parseFloat(financialScore.toFixed(1)), weight: 'Bobot: 18%', color: '#f59e0b' },
@@ -398,7 +412,7 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
             <p className="text-red-800 text-sm font-medium">Anda wajib mengikuti PUB Khusus sesuai Permen PUPR 7/2024 agar tidak di-blacklist dari tender BUMN!</p>
           </div>
           <a 
-            href="https://dp.dokumenproyek.com" 
+            href={applyRef('https://dp.dokumenproyek.com')}
             className="shrink-0 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg shadow-sm transition-colors w-full md:w-auto text-center"
             data-testid="cta-pub"
           >
@@ -415,7 +429,7 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
             Rekomendasi Solusi untuk Perusahaan Anda
           </h3>
           {salesAlerts.map(alert => (
-            <SalesAlertCard key={alert.id} alert={alert} onOrder={openOrder} />
+            <SalesAlertCard key={alert.id} alert={alert} onOrder={openOrder} applyRef={applyRef} />
           ))}
         </div>
       )}
@@ -480,7 +494,7 @@ export function Step4Hasil({ onReset }: { onReset: () => void }) {
                   <h4 className="font-bold text-white mb-4 text-[15px] leading-snug">{action.title}</h4>
                 </div>
                 <a 
-                  href={action.href} 
+                  href={applyRef(action.href)}
                   target="_blank" 
                   rel="noreferrer"
                   className="inline-flex items-center justify-center gap-2 w-full bg-slate-700 hover:bg-amber-500 text-white hover:text-slate-900 font-bold py-2.5 rounded-md transition-colors text-sm"
