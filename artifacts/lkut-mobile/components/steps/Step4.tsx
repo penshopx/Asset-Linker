@@ -12,6 +12,7 @@ import {
   getGrade,
   getGradeColor,
 } from '@/lib/lkutCalculator';
+import { getSalesAlerts, TriggerAlert } from '@/lib/salesEngine';
 
 const INDICATOR_NAMES: Record<string, string> = {
   assetGrowth: 'Pertumbuhan Aset',
@@ -139,6 +140,7 @@ export function Step4({ onReset }: Step4Props) {
   const needsPUB = ['B', 'C', 'D'].includes(grade);
 
   const lowestKeys = getLowestIndicators(indicatorScores, 3);
+  const salesAlerts = getSalesAlerts(data, indicatorScores);
 
   const openURL = (url: string) => {
     Linking.openURL(url).catch(() => {});
@@ -165,6 +167,63 @@ export function Step4({ onReset }: Step4Props) {
             <Ionicons name="chevron-forward" size={18} color="#b91c1c" />
           </View>
         </Pressable>
+      )}
+
+      {/* Sales Alert Cards */}
+      {salesAlerts.length > 0 && (
+        <View testID="sales-alerts-section">
+          {salesAlerts.map((alert) => {
+            const isCritical = alert.severity === 'critical';
+            const bgColor = isCritical ? '#fee2e2' : '#fefce8';
+            const borderColor = isCritical ? '#fca5a5' : '#fde047';
+            const titleColor = isCritical ? '#b91c1c' : '#854d0e';
+            const bodyColor = isCritical ? '#991b1b' : '#713f12';
+            return (
+              <View
+                key={alert.id}
+                style={[styles.alertCard, { backgroundColor: bgColor, borderColor, borderRadius: colors.radius }]}
+                testID={`sales-alert-${alert.id}`}
+              >
+                <Text style={[styles.alertTitle, { color: titleColor }]}>{alert.title}</Text>
+                <Text style={[styles.alertBody, { color: bodyColor }]}>{alert.body}</Text>
+                <View style={styles.alertProducts}>
+                  {alert.products.map((product, pIdx) => (
+                    <Pressable
+                      key={pIdx}
+                      onPress={() => openURL(product.href)}
+                      style={({ pressed }) => [
+                        styles.alertProductBtn,
+                        {
+                          borderRadius: colors.radius,
+                          backgroundColor: product.primary
+                            ? (isCritical ? '#b91c1c' : '#854d0e')
+                            : (pressed ? borderColor : 'rgba(0,0,0,0.06)'),
+                          borderColor: product.primary ? 'transparent' : borderColor,
+                          opacity: pressed ? 0.85 : 1,
+                        },
+                      ]}
+                      testID={`alert-product-${alert.id}-${pIdx}`}
+                    >
+                      <Text
+                        style={[
+                          styles.alertProductText,
+                          { color: product.primary ? '#fff' : titleColor },
+                        ]}
+                      >
+                        {product.label}
+                      </Text>
+                      <Ionicons
+                        name="arrow-forward"
+                        size={13}
+                        color={product.primary ? '#fff' : titleColor}
+                      />
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+        </View>
       )}
 
       {/* Grade Circle */}
@@ -469,6 +528,41 @@ const styles = StyleSheet.create({
   ctaBtnText: {
     fontSize: 13,
     fontWeight: '700' as const,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
+  },
+  alertCard: {
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  alertTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    marginBottom: 6,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
+  },
+  alertBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_400Regular' : undefined,
+  },
+  alertProducts: {
+    gap: 8,
+  },
+  alertProductBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  alertProductText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    flex: 1,
     fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
   },
 });

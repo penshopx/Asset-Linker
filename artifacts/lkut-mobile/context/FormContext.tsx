@@ -3,7 +3,7 @@ import { LkutFormData, DEFAULT_FORM } from '@/lib/types';
 
 interface FormContextValue {
   data: LkutFormData;
-  setField: (field: keyof LkutFormData, value: number | string) => void;
+  setField: (field: keyof LkutFormData, value: number | string | boolean | null) => void;
   reset: () => void;
 }
 
@@ -12,7 +12,7 @@ const FormContext = createContext<FormContextValue | null>(null);
 export function FormProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<LkutFormData>({ ...DEFAULT_FORM });
 
-  const setField = (field: keyof LkutFormData, value: number | string) => {
+  const setField = (field: keyof LkutFormData, value: number | string | boolean | null) => {
     setData((prev) => ({ ...prev, [field]: value }));
   };
 

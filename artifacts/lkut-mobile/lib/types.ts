@@ -33,6 +33,10 @@ export interface LkutFormData {
 
   // Proyek
   projectScore: number;
+
+  // Sales Engine inputs
+  skkMonthsLeft: number | null;
+  hasSmap: boolean;
 }
 
 export const DEFAULT_FORM: LkutFormData = {
@@ -61,4 +65,6 @@ export const DEFAULT_FORM: LkutFormData = {
   hrEmpowerment: 35,
   companyCapacity: 8,
   projectScore: 75,
+  skkMonthsLeft: null,
+  hasSmap: true,
 };

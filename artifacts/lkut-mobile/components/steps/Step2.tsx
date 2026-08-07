@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform, TextInput, Pressable } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { MetricInput } from '@/components/MetricInput';
 import { THRESHOLDS } from '@/lib/lkutCalculator';
+import { useForm } from '@/context/FormContext';
 
 function SectionHeader({ title, colors }: { title: string; colors: any }) {
   return (
@@ -14,6 +15,7 @@ function SectionHeader({ title, colors }: { title: string; colors: any }) {
 
 export function Step2() {
   const colors = useColors();
+  const { data, setField } = useForm();
 
   return (
     <View>
@@ -64,6 +66,91 @@ export function Step2() {
           hint="Lebih kecil = lebih baik"
         />
       </View>
+
+      {/* E. Info SKK & SMAP */}
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+        <SectionHeader title="E. SKK & Dokumen SMAP" colors={colors} />
+
+        {/* SKK Months Left */}
+        <View style={styles.fieldWrap}>
+          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+            Sisa masa berlaku SKK
+          </Text>
+          <Text style={[styles.fieldHint, { color: colors.mutedForeground }]}>
+            Kosongkan jika tidak relevan
+          </Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={[
+                styles.textInput,
+                { borderColor: colors.border, backgroundColor: colors.background, color: colors.foreground, borderRadius: colors.radius },
+              ]}
+              value={data.skkMonthsLeft !== null && data.skkMonthsLeft !== undefined ? String(data.skkMonthsLeft) : ''}
+              onChangeText={(val) => {
+                if (val === '') {
+                  setField('skkMonthsLeft', null);
+                } else {
+                  const parsed = parseInt(val, 10);
+                  if (!isNaN(parsed)) setField('skkMonthsLeft', parsed);
+                }
+              }}
+              keyboardType="numeric"
+              returnKeyType="done"
+              selectTextOnFocus
+              placeholder="—"
+              placeholderTextColor={colors.mutedForeground}
+              testID="skkMonthsLeft"
+            />
+            <View style={[styles.unitBadge, { backgroundColor: colors.secondary, borderRadius: colors.radius }]}>
+              <Text style={[styles.unitText, { color: colors.mutedForeground }]}>Bulan</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* hasSmap Toggle */}
+        <View style={[styles.fieldWrap, { marginBottom: 0 }]}>
+          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+            Sudah memiliki dokumen SMAP (ISO 37001)?
+          </Text>
+          <Text style={[styles.fieldHint, { color: colors.mutedForeground }]}>
+            Dokumen Anti Penyuapan — wajib untuk perpanjangan SBU
+          </Text>
+          <View style={styles.toggleRow}>
+            <Pressable
+              onPress={() => setField('hasSmap', true)}
+              style={[
+                styles.toggleBtn,
+                {
+                  borderRadius: colors.radius,
+                  backgroundColor: data.hasSmap === true ? colors.primary : colors.secondary,
+                  borderColor: data.hasSmap === true ? colors.primary : colors.border,
+                },
+              ]}
+              testID="hasSmap-yes"
+            >
+              <Text style={[styles.toggleText, { color: data.hasSmap === true ? '#fff' : colors.mutedForeground }]}>
+                ✓ Sudah
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setField('hasSmap', false)}
+              style={[
+                styles.toggleBtn,
+                {
+                  borderRadius: colors.radius,
+                  backgroundColor: data.hasSmap === false ? '#b91c1c' : colors.secondary,
+                  borderColor: data.hasSmap === false ? '#b91c1c' : colors.border,
+                },
+              ]}
+              testID="hasSmap-no"
+            >
+              <Text style={[styles.toggleText, { color: data.hasSmap === false ? '#fff' : colors.mutedForeground }]}>
+                ✗ Belum
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
     </View>
   );
 }
@@ -92,6 +179,58 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     paddingBottom: 10,
     borderBottomWidth: 1,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
+  },
+  fieldWrap: {
+    marginBottom: 16,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    marginBottom: 2,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_600SemiBold' : undefined,
+  },
+  fieldHint: {
+    fontSize: 11,
+    marginBottom: 8,
+    fontStyle: 'italic' as const,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_400Regular' : undefined,
+  },
+  inputRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    fontWeight: '500' as const,
+  },
+  unitBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  unitText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_600SemiBold' : undefined,
+  },
+  toggleRow: {
+    flexDirection: 'row' as const,
+    gap: 10,
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center' as const,
+    borderWidth: 1,
+  },
+  toggleText: {
+    fontSize: 14,
+    fontWeight: '700' as const,
     fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
   },
 });
