@@ -6,6 +6,32 @@ import { sendOrderNotification, sendBuyerConfirmation } from "../lib/mailer";
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// ─── Idempotency cache ────────────────────────────────────────────────────────
+// Each entry is EITHER:
+//   { kind: "done" }    – request completed; holds the order_id and TTL
+//   { kind: "inflight"} – request is in progress; holds a Promise that resolves
+//                         to the order_id when the first request finishes
+//
+// The key is stored atomically BEFORE any side effect (storage upload, DB insert)
+// so that concurrent requests bearing the same key wait on the in-flight promise
+// instead of racing past the check and each creating their own order.
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+type IdempotencyEntry =
+  | { kind: "done"; orderId: string; expiresAt: number }
+  | { kind: "inflight"; promise: Promise<string> };
+
+const idempotencyCache = new Map<string, IdempotencyEntry>();
+
+function cleanupExpiredKeys() {
+  const now = Date.now();
+  for (const [key, entry] of idempotencyCache) {
+    if (entry.kind === "done" && entry.expiresAt <= now) {
+      idempotencyCache.delete(key);
+    }
+  }
+}
+
 // ─── Auth middleware for admin routes ────────────────────────────────────────
 function requireAdmin(req: any, res: any, next: any) {
   const passcode = req.headers["x-admin-passcode"] as string | undefined;
@@ -26,7 +52,59 @@ router.post(
       return res.status(400).json({ error: "Field wajib tidak lengkap." });
     }
 
-    // Try to upload proof file to Supabase Storage
+    // ── Idempotency gate ──────────────────────────────────────────────────────
+    // 1. Check for a previously completed or in-flight request with the same key.
+    // 2. If in-flight: await the existing promise so we share the result instead
+    //    of creating a second order.
+    // 3. If done within TTL: return cached result immediately.
+    // 4. Otherwise: lock the key with a pending promise BEFORE any side effect,
+    //    then fulfil/reject it after the DB write completes.
+    const idempotencyKey = (req.headers["x-idempotency-key"] as string | undefined)?.trim();
+
+    if (idempotencyKey) {
+      cleanupExpiredKeys();
+      const existing = idempotencyCache.get(idempotencyKey);
+
+      if (existing) {
+        if (existing.kind === "done" && existing.expiresAt > Date.now()) {
+          console.log(`[orders] Idempotency hit (done) for key ${idempotencyKey}, order ${existing.orderId}`);
+          return res.status(200).json({ ok: true, order_id: existing.orderId });
+        }
+
+        if (existing.kind === "inflight") {
+          // Another request with the same key is still processing — wait for it.
+          console.log(`[orders] Idempotency hit (inflight) for key ${idempotencyKey}, awaiting result`);
+          try {
+            const orderId = await existing.promise;
+            return res.status(200).json({ ok: true, order_id: orderId });
+          } catch {
+            // The first request failed; allow this retry to proceed as a fresh attempt.
+            idempotencyCache.delete(idempotencyKey);
+          }
+        }
+        // Expired done entry — fall through to process fresh.
+      }
+    }
+
+    // ── Lock the key before any side effect ──────────────────────────────────
+    // Any concurrent request with the same key will hit the "inflight" branch above
+    // and wait on this promise rather than starting a second order creation.
+    let resolveKey!: (orderId: string) => void;
+    let rejectKey!: (err: unknown) => void;
+    const inflightPromise = new Promise<string>((resolve, reject) => {
+      resolveKey = resolve;
+      rejectKey = reject;
+    });
+    // Attach a no-op catch so Node never sees this as an unhandled rejection,
+    // even if no concurrent request is awaiting it when it is rejected.
+    // Actual waiters that await the promise receive the rejection normally.
+    inflightPromise.catch(() => {});
+
+    if (idempotencyKey) {
+      idempotencyCache.set(idempotencyKey, { kind: "inflight", promise: inflightPromise });
+    }
+
+    // ── Side effects (storage + DB) ───────────────────────────────────────────
     let buktUrl: string | null = null;
     let buktFilename: string | null = null;
 
@@ -36,7 +114,7 @@ router.post(
       buktFilename = filename;
 
       try {
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const { error: uploadError } = await supabase.storage
           .from("proofs")
           .upload(filename, req.file.buffer, {
             contentType: req.file.mimetype,
@@ -54,7 +132,6 @@ router.post(
       }
     }
 
-    // Insert order into Supabase
     const { data: order, error: dbError } = await supabase
       .from("orders")
       .insert({
@@ -73,7 +150,22 @@ router.post(
 
     if (dbError) {
       console.error("[orders] DB insert error:", dbError);
+      // Reject the in-flight promise so waiting retries can attempt again.
+      if (idempotencyKey) {
+        rejectKey(dbError);
+        idempotencyCache.delete(idempotencyKey);
+      }
       return res.status(500).json({ error: "Gagal menyimpan pesanan. Coba lagi." });
+    }
+
+    // ── Fulfil the promise and promote the entry to "done" ───────────────────
+    resolveKey(order.id);
+    if (idempotencyKey) {
+      idempotencyCache.set(idempotencyKey, {
+        kind: "done",
+        orderId: order.id,
+        expiresAt: Date.now() + IDEMPOTENCY_TTL_MS,
+      });
     }
 
     // Send email notification to admin (best-effort)

@@ -41,6 +41,8 @@ export function KonfirmasiPesananModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+  // Idempotency key: generated once per modal open, reused on retry, reset on close
+  const idempotencyKeyRef = useRef<string>('');
 
   // Sync produk when defaultProduk changes (user clicks different product)
   React.useEffect(() => {
@@ -51,6 +53,8 @@ export function KonfirmasiPesananModal({
       setErrorMsg('');
       setFieldErrors({});
       setFile(null);
+      // Generate a fresh idempotency key each time the modal opens
+      idempotencyKeyRef.current = crypto.randomUUID();
     }
   }, [isOpen, defaultProduk]);
 
@@ -92,6 +96,9 @@ export function KonfirmasiPesananModal({
 
       const res = await fetch(`${API_BASE}/konfirmasi-pesanan`, {
         method: 'POST',
+        headers: {
+          'X-Idempotency-Key': idempotencyKeyRef.current,
+        },
         body: fd,
       });
 
