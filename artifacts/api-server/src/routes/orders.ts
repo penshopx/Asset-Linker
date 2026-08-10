@@ -104,6 +104,28 @@ router.post(
   }
 );
 
+// ─── GET /api/pesanan/:id — public order status (non-sensitive fields only) ───
+router.get("/pesanan/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id, status, produk, created_at, updated_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[orders] GET pesanan error:", error);
+    return res.status(500).json({ error: "Gagal memuat data pesanan. Coba lagi nanti." });
+  }
+
+  if (!data) {
+    return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+  }
+
+  return res.json(data);
+});
+
 // ─── GET /api/admin/orders ────────────────────────────────────────────────────
 router.get("/admin/orders", requireAdmin, async (_req, res) => {
   const { data, error } = await supabase

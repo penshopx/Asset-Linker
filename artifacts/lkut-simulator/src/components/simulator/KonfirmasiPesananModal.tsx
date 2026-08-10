@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Send, CheckCircle2, AlertCircle, Upload, Loader2, ShoppingCart } from 'lucide-react';
+import { X, Send, CheckCircle2, AlertCircle, Upload, Loader2, ShoppingCart, Copy, Check } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
@@ -357,17 +357,40 @@ function inputCls(hasError: boolean) {
 }
 
 function SuccessView({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+  const statusUrl = orderId ? `${basePath}/cek-pesanan?id=${orderId}` : `${basePath}/cek-pesanan`;
+
+  const handleCopy = () => {
+    if (!orderId) return;
+    navigator.clipboard.writeText(orderId).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <div className="flex flex-col items-center justify-center py-12 px-8 text-center gap-5">
       <div className="bg-emerald-100 rounded-full p-5">
         <CheckCircle2 className="w-12 h-12 text-emerald-600" />
       </div>
-      <div>
+      <div className="w-full">
         <h3 className="text-xl font-bold text-slate-900 mb-1">Pesanan Diterima! 🎉</h3>
         {orderId && (
-          <p className="text-xs font-mono text-slate-400 bg-slate-100 rounded px-2 py-1 inline-block mb-3">
-            ID Pesanan: #{orderId.slice(0, 8).toUpperCase()}
-          </p>
+          <div className="mt-2 mb-3">
+            <p className="text-xs text-slate-500 mb-1.5">ID Pesanan (simpan untuk cek status):</p>
+            <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2 border border-slate-200">
+              <span className="font-mono text-xs text-slate-700 flex-1 text-left break-all">{orderId}</span>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="shrink-0 p-1 rounded hover:bg-slate-200 transition-colors text-slate-500 hover:text-slate-700"
+                aria-label="Salin ID Pesanan"
+              >
+                {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
         )}
         <p className="text-slate-600 text-sm leading-relaxed">
           Tim kami akan menghubungi Anda dalam <strong>1×24 jam</strong> melalui WhatsApp atau Email yang terdaftar.
@@ -377,9 +400,17 @@ function SuccessView({ orderId, onClose }: { orderId: string | null; onClose: ()
         <p className="font-semibold mb-0.5">Langkah selanjutnya:</p>
         <p className="text-amber-700">Simpan ID pesanan Anda, dan pastikan WhatsApp Anda aktif agar konsultan kami bisa segera menjangkau Anda.</p>
       </div>
+      {orderId && (
+        <a
+          href={statusUrl}
+          className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-6 py-3 rounded-xl transition-colors text-sm border border-slate-200"
+        >
+          Cek Status Pesanan →
+        </a>
+      )}
       <button
         onClick={onClose}
-        className="bg-slate-900 hover:bg-slate-700 text-white font-bold px-8 py-3 rounded-xl transition-colors text-sm"
+        className="bg-slate-900 hover:bg-slate-700 text-white font-bold px-8 py-3 rounded-xl transition-colors text-sm w-full"
       >
         Tutup
       </button>
