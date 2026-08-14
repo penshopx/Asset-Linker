@@ -6,31 +6,15 @@ import { sendOrderNotification, sendBuyerConfirmation, sendStatusUpdate, type Or
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-// ─── Idempotency cache ────────────────────────────────────────────────────────
-// Each entry is EITHER:
-//   { kind: "done" }    – request completed; holds the order_id and TTL
-//   { kind: "inflight"} – request is in progress; holds a Promise that resolves
-//                         to the order_id when the first request finishes
+// ─── Idempotency ──────────────────────────────────────────────────────────────
+// Source of truth: the `idempotency_keys` DB table (write-protected by RLS,
+// accessible only via the SECURITY DEFINER function `create_order_idempotent`).
 //
-// The key is stored atomically BEFORE any side effect (storage upload, DB insert)
-// so that concurrent requests bearing the same key wait on the in-flight promise
-// instead of racing past the check and each creating their own order.
-const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// The in-process map coalesces concurrent same-process requests while the first
+// RPC call is still in flight — it is NOT a cache; it does NOT survive restarts.
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // mirrors the 10-min TTL in the DB function
 
-type IdempotencyEntry =
-  | { kind: "done"; orderId: string; expiresAt: number }
-  | { kind: "inflight"; promise: Promise<string> };
-
-const idempotencyCache = new Map<string, IdempotencyEntry>();
-
-function cleanupExpiredKeys() {
-  const now = Date.now();
-  for (const [key, entry] of idempotencyCache) {
-    if (entry.kind === "done" && entry.expiresAt <= now) {
-      idempotencyCache.delete(key);
-    }
-  }
-}
+const inflightMap = new Map<string, Promise<string>>();
 
 // ─── Auth middleware for admin routes ────────────────────────────────────────
 function requireAdmin(req: any, res: any, next: any) {
@@ -48,7 +32,6 @@ async function sendAndTrackBuyerEmail(
 ): Promise<void> {
   try {
     await sendBuyerConfirmation(emailData);
-    // Mark as sent
     const { error } = await supabase
       .from("orders")
       .update({ buyer_email_sent: true, buyer_email_error: null })
@@ -59,7 +42,6 @@ async function sendAndTrackBuyerEmail(
   } catch (e: any) {
     const errMsg = e?.message ?? String(e);
     console.error("[orders] Buyer confirmation email failed:", errMsg);
-    // Persist failure so admin can see it and retry
     const { error } = await supabase
       .from("orders")
       .update({ buyer_email_sent: false, buyer_email_error: errMsg })
@@ -75,52 +57,47 @@ router.post(
   "/konfirmasi-pesanan",
   upload.single("bukti_pembayaran"),
   async (req, res) => {
-    const { nama_perusahaan, nama_pic, email, whatsapp, produk, catatan } = req.body as Record<string, string>;
+    const { nama_perusahaan, nama_pic, email, whatsapp, produk, catatan } =
+      req.body as Record<string, string>;
 
     if (!nama_perusahaan || !nama_pic || !email || !whatsapp || !produk) {
       return res.status(400).json({ error: "Field wajib tidak lengkap." });
     }
 
-    // ── Idempotency gate ──────────────────────────────────────────────────────
-    const idempotencyKey = (req.headers["x-idempotency-key"] as string | undefined)?.trim();
+    const idempotencyKey =
+      (req.headers["x-idempotency-key"] as string | undefined)?.trim() || null;
 
+    // ── In-process gate (same server process, concurrent requests) ────────────
+    // This avoids firing multiple RPCs for the exact same key simultaneously.
     if (idempotencyKey) {
-      cleanupExpiredKeys();
-      const existing = idempotencyCache.get(idempotencyKey);
-
-      if (existing) {
-        if (existing.kind === "done" && existing.expiresAt > Date.now()) {
-          console.log(`[orders] Idempotency hit (done) for key ${idempotencyKey}, order ${existing.orderId}`);
-          return res.status(200).json({ ok: true, order_id: existing.orderId });
+      const inflight = inflightMap.get(idempotencyKey);
+      if (inflight) {
+        console.log(`[orders] Idempotency hit (inflight) for key ${idempotencyKey}`);
+        try {
+          const orderId = await inflight;
+          return res.status(200).json({ ok: true, order_id: orderId });
+        } catch {
+          inflightMap.delete(idempotencyKey);
+          // First request failed — fall through to attempt a fresh RPC.
         }
-
-        if (existing.kind === "inflight") {
-          console.log(`[orders] Idempotency hit (inflight) for key ${idempotencyKey}, awaiting result`);
-          try {
-            const orderId = await existing.promise;
-            return res.status(200).json({ ok: true, order_id: orderId });
-          } catch {
-            idempotencyCache.delete(idempotencyKey);
-          }
-        }
-        // Expired done entry — fall through to process fresh.
       }
     }
 
-    // ── Lock the key before any side effect ──────────────────────────────────
-    let resolveKey!: (orderId: string) => void;
-    let rejectKey!: (err: unknown) => void;
-    const inflightPromise = new Promise<string>((resolve, reject) => {
-      resolveKey = resolve;
-      rejectKey = reject;
+    // ── Register in-flight promise so concurrent same-process requests wait ───
+    let resolveInflight!: (id: string) => void;
+    let rejectInflight!: (err: unknown) => void;
+    const inflightPromise = new Promise<string>((res, rej) => {
+      resolveInflight = res;
+      rejectInflight = rej;
     });
-    inflightPromise.catch(() => {});
+    inflightPromise.catch(() => {}); // suppress UnhandledPromiseRejection
 
     if (idempotencyKey) {
-      idempotencyCache.set(idempotencyKey, { kind: "inflight", promise: inflightPromise });
+      inflightMap.set(idempotencyKey, inflightPromise);
     }
 
-    // ── Side effects (storage + DB) ───────────────────────────────────────────
+    // ── File upload (best-effort, non-transactional) ──────────────────────────
+    // Happens before the atomic RPC so the URL can be included in the order row.
     let buktUrl: string | null = null;
     let buktFilename: string | null = null;
 
@@ -148,49 +125,70 @@ router.post(
       }
     }
 
-    const { data: order, error: dbError } = await supabase
-      .from("orders")
-      .insert({
-        nama_perusahaan,
-        nama_pic,
-        email,
-        whatsapp,
-        produk,
-        catatan: catatan ?? null,
-        bukti_filename: buktFilename,
-        bukti_url: buktUrl,
-        status: "baru",
-        // Initialise email tracking — will be updated after send attempt below
-        buyer_email_sent: false,
-        buyer_email_error: null,
-      })
-      .select()
-      .single();
+    // ── Atomic order creation + idempotency key claim ─────────────────────────
+    // The SECURITY DEFINER Postgres function `create_order_idempotent` does both
+    // in a single transaction:
+    //   • If the key already exists and is within TTL → returns the existing order
+    //     (is_duplicate = true) without inserting anything.
+    //   • If the key is expired → deletes it and creates a fresh order.
+    //   • If the key is new → inserts the order row and claims the key atomically.
+    //   • Concurrent race (unique_violation on key insert) rolls back the entire
+    //     transaction (order insert included) — no orphan orders are created.
+    //     The losing process gets a 23505 error; we retry once.  On the retry
+    //     the winner's key is already in the table so we return a duplicate.
+    const rpcParams = {
+      p_idempotency_key: idempotencyKey,
+      p_nama_perusahaan: nama_perusahaan,
+      p_nama_pic: nama_pic,
+      p_email: email,
+      p_whatsapp: whatsapp,
+      p_produk: produk,
+      p_catatan: catatan ?? null,
+      p_bukti_filename: buktFilename,
+      p_bukti_url: buktUrl,
+    };
 
-    if (dbError) {
-      console.error("[orders] DB insert error:", dbError);
+    let { data: rpcRows, error: rpcError } = await supabase.rpc(
+      "create_order_idempotent",
+      rpcParams
+    );
+
+    // ── Handle concurrent race: retry once ───────────────────────────────────
+    if (rpcError && (rpcError as any).code === "23505" && idempotencyKey) {
+      console.log(`[orders] Race on key ${idempotencyKey}; retrying to find winner`);
+      const retried = await supabase.rpc("create_order_idempotent", rpcParams);
+      rpcRows = retried.data;
+      rpcError = retried.error;
+    }
+
+    if (rpcError) {
+      console.error("[orders] create_order_idempotent error:", rpcError);
       if (idempotencyKey) {
-        rejectKey(dbError);
-        idempotencyCache.delete(idempotencyKey);
+        rejectInflight(rpcError);
+        inflightMap.delete(idempotencyKey);
       }
       return res.status(500).json({ error: "Gagal menyimpan pesanan. Coba lagi." });
     }
 
-    // ── History is recorded automatically by the orders_status_history DB trigger ─
-    // No explicit write needed here.
+    // rpcRows is an array (RETURNS TABLE); take the first (and only) row.
+    const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+    const orderId: string = row.order_id;
+    const isDuplicate: boolean = row.is_duplicate;
 
-    // ── Fulfil the promise and promote the entry to "done" ───────────────────
-    resolveKey(order.id);
+    resolveInflight(orderId);
     if (idempotencyKey) {
-      idempotencyCache.set(idempotencyKey, {
-        kind: "done",
-        orderId: order.id,
-        expiresAt: Date.now() + IDEMPOTENCY_TTL_MS,
-      });
+      inflightMap.delete(idempotencyKey);
     }
 
+    // ── Duplicate: order already existed — skip side effects ─────────────────
+    if (isDuplicate) {
+      console.log(`[orders] Idempotency hit (DB) for key ${idempotencyKey}, order ${orderId}`);
+      return res.status(200).json({ ok: true, order_id: orderId });
+    }
+
+    // ── New order: send emails ────────────────────────────────────────────────
     const emailData: OrderEmailData = {
-      orderId: order.id,
+      orderId,
       namaPerusahaan: nama_perusahaan,
       namaPic: nama_pic,
       email,
@@ -200,17 +198,17 @@ router.post(
       buktUrl: buktUrl ?? undefined,
     };
 
-    // Send notification to admin (best-effort, not tracked)
+    // History is recorded automatically by the orders_status_history DB trigger.
+
     sendOrderNotification(emailData).catch((e) =>
       console.error("[orders] Admin email notification error:", e)
     );
 
-    // Send buyer confirmation and persist the send status in the DB
-    sendAndTrackBuyerEmail(order.id, emailData).catch((e) =>
+    sendAndTrackBuyerEmail(orderId, emailData).catch((e) =>
       console.error("[orders] sendAndTrackBuyerEmail unexpected error:", e)
     );
 
-    return res.status(201).json({ ok: true, order_id: order.id });
+    return res.status(201).json({ ok: true, order_id: orderId });
   }
 );
 
@@ -252,7 +250,6 @@ router.get("/pesanan/:id", async (req, res) => {
 });
 
 // ─── GET /api/admin/orders ────────────────────────────────────────────────────
-// Returns all columns including buyer_email_sent and buyer_email_error.
 router.get("/admin/orders", requireAdmin, async (_req, res) => {
   const { data, error } = await supabase
     .from("orders")
@@ -288,7 +285,6 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
 
   // History is recorded automatically by the orders_status_history DB trigger.
 
-  // Send status-change notification to buyer (best-effort — never fails the response)
   sendStatusUpdate({
     orderId: data.id,
     namaPerusahaan: data.nama_perusahaan,
@@ -304,11 +300,9 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
 });
 
 // ─── POST /api/admin/orders/:id/retry-buyer-email ────────────────────────────
-// Allows an admin to manually resend the buyer confirmation for a failed order.
 router.post("/admin/orders/:id/retry-buyer-email", requireAdmin, async (req, res) => {
   const { id } = req.params;
 
-  // Fetch the order (need all fields to rebuild email payload)
   const { data: order, error: fetchError } = await supabase
     .from("orders")
     .select("*")

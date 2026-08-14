@@ -11,13 +11,122 @@ import { supabase } from "./supabase";
 
 /**
  * SQL that must be applied to the database exactly once.
- * Safe to re-run (uses IF NOT EXISTS / idempotent ALTER).
+ * Safe to re-run (uses IF NOT EXISTS / CREATE OR REPLACE / idempotent ALTER).
  */
 const MIGRATION_SQL = `
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS buyer_email_sent  BOOLEAN DEFAULT FALSE NOT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_error TEXT    DEFAULT NULL;
 
+-- Remove the short-lived unique index/column added in an earlier migration attempt.
+DROP INDEX  IF EXISTS orders_idempotency_key_unique;
+ALTER TABLE orders DROP COLUMN IF EXISTS idempotency_key;
+
+-- ── Idempotency table ───────────────────────────────────────────────────────
+-- Row-level security is enabled with NO policies, so direct anon/service-role
+-- reads and writes are denied.  The SECURITY DEFINER function below is the
+-- only entry point, preventing external tampering of the idempotency ledger.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  key        TEXT        PRIMARY KEY,
+  order_id   UUID        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE idempotency_keys ENABLE ROW LEVEL SECURITY;
+
+-- Drop overly-permissive policy from earlier attempt, if present.
+DROP POLICY IF EXISTS "idempotency_keys_anon_all" ON idempotency_keys;
+
+-- ── Atomic order-creation function ─────────────────────────────────────────
+-- This SECURITY DEFINER function is the single write path for both the orders
+-- table and the idempotency_keys ledger.  Running both inside one transaction
+-- ensures:
+--   • The key is claimed and the order is created atomically — a crash between
+--     the two is impossible.
+--   • Expired keys are cleaned up and the slot is reused.
+--   • A concurrent race (unique_violation on the key insert) rolls back the
+--     entire transaction, including the order insert, so no orphan orders are
+--     created.  The losing process receives the error and can retry; on retry
+--     it finds the winner's key and returns their order as a duplicate.
+CREATE OR REPLACE FUNCTION create_order_idempotent(
+  p_idempotency_key TEXT,
+  p_nama_perusahaan TEXT,
+  p_nama_pic        TEXT,
+  p_email           TEXT,
+  p_whatsapp        TEXT,
+  p_produk          TEXT,
+  p_catatan         TEXT,
+  p_bukti_filename  TEXT,
+  p_bukti_url       TEXT
+)
+RETURNS TABLE(order_id UUID, is_duplicate BOOLEAN)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_order_id UUID;
+  v_existing RECORD;
+  v_ttl CONSTANT INTERVAL := '10 minutes';
+BEGIN
+  -- ── Idempotency check (only when a key was supplied) ──────────────────────
+  IF p_idempotency_key IS NOT NULL THEN
+    -- Acquire a transaction-scoped exclusive advisory lock keyed by the
+    -- idempotency key before ANY read/write on idempotency_keys.
+    -- This serializes ALL concurrent transactions that share the same key,
+    -- including the expired-entry replacement path, so only one transaction
+    -- at a time can execute the lookup → delete-if-expired → insert sequence.
+    -- The lock is automatically released when this transaction ends (commit or
+    -- rollback), so there is no risk of a deadlock between unrelated keys.
+    PERFORM pg_advisory_xact_lock(hashtext(p_idempotency_key)::bigint);
+
+    SELECT ik.order_id, ik.created_at
+    INTO   v_existing
+    FROM   idempotency_keys ik
+    WHERE  ik.key = p_idempotency_key;
+
+    IF FOUND THEN
+      IF v_existing.created_at > NOW() - v_ttl THEN
+        -- Non-expired duplicate: return the existing order immediately.
+        RETURN QUERY SELECT v_existing.order_id, TRUE;
+        RETURN;
+      ELSE
+        -- Expired: delete so the key slot can be reused.
+        -- The advisory lock ensures no other transaction is concurrently
+        -- doing the same delete/reuse, preventing duplicate orders at the
+        -- TTL boundary.
+        DELETE FROM idempotency_keys WHERE key = p_idempotency_key;
+      END IF;
+    END IF;
+  END IF;
+
+  -- ── Create the order ──────────────────────────────────────────────────────
+  INSERT INTO orders(
+    nama_perusahaan, nama_pic, email, whatsapp, produk,
+    catatan, bukti_filename, bukti_url, status,
+    buyer_email_sent, buyer_email_error
+  )
+  VALUES(
+    p_nama_perusahaan, p_nama_pic, p_email, p_whatsapp, p_produk,
+    p_catatan, p_bukti_filename, p_bukti_url, 'baru',
+    FALSE, NULL
+  )
+  RETURNING id INTO v_order_id;
+
+  -- ── Claim the idempotency key atomically ──────────────────────────────────
+  -- This runs in the SAME transaction as the order insert above.
+  -- A unique_violation here propagates to the caller and rolls back
+  -- both this INSERT and the order INSERT above — no orphan orders.
+  IF p_idempotency_key IS NOT NULL THEN
+    INSERT INTO idempotency_keys(key, order_id)
+    VALUES(p_idempotency_key, v_order_id);
+  END IF;
+
+  RETURN QUERY SELECT v_order_id, FALSE;
+END;
+$$;
+
+-- ── Status history ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS status_history (
   id         BIGSERIAL    PRIMARY KEY,
   order_id   UUID         NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
