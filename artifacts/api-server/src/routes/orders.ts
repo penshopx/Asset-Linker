@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { supabase } from "../lib/supabase";
-import { sendOrderNotification, sendBuyerConfirmation } from "../lib/mailer";
+import { sendOrderNotification, sendBuyerConfirmation, type OrderEmailData } from "../lib/mailer";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -41,6 +41,35 @@ function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
+// ─── Helper: send buyer confirmation and persist the result ──────────────────
+async function sendAndTrackBuyerEmail(
+  orderId: string,
+  emailData: OrderEmailData
+): Promise<void> {
+  try {
+    await sendBuyerConfirmation(emailData);
+    // Mark as sent
+    const { error } = await supabase
+      .from("orders")
+      .update({ buyer_email_sent: true, buyer_email_error: null })
+      .eq("id", orderId);
+    if (error) {
+      console.error("[orders] Failed to record buyer_email_sent=true:", error.message);
+    }
+  } catch (e: any) {
+    const errMsg = e?.message ?? String(e);
+    console.error("[orders] Buyer confirmation email failed:", errMsg);
+    // Persist failure so admin can see it and retry
+    const { error } = await supabase
+      .from("orders")
+      .update({ buyer_email_sent: false, buyer_email_error: errMsg })
+      .eq("id", orderId);
+    if (error) {
+      console.error("[orders] Failed to record buyer_email_error:", error.message);
+    }
+  }
+}
+
 // ─── POST /api/konfirmasi-pesanan ─────────────────────────────────────────────
 router.post(
   "/konfirmasi-pesanan",
@@ -53,12 +82,6 @@ router.post(
     }
 
     // ── Idempotency gate ──────────────────────────────────────────────────────
-    // 1. Check for a previously completed or in-flight request with the same key.
-    // 2. If in-flight: await the existing promise so we share the result instead
-    //    of creating a second order.
-    // 3. If done within TTL: return cached result immediately.
-    // 4. Otherwise: lock the key with a pending promise BEFORE any side effect,
-    //    then fulfil/reject it after the DB write completes.
     const idempotencyKey = (req.headers["x-idempotency-key"] as string | undefined)?.trim();
 
     if (idempotencyKey) {
@@ -72,13 +95,11 @@ router.post(
         }
 
         if (existing.kind === "inflight") {
-          // Another request with the same key is still processing — wait for it.
           console.log(`[orders] Idempotency hit (inflight) for key ${idempotencyKey}, awaiting result`);
           try {
             const orderId = await existing.promise;
             return res.status(200).json({ ok: true, order_id: orderId });
           } catch {
-            // The first request failed; allow this retry to proceed as a fresh attempt.
             idempotencyCache.delete(idempotencyKey);
           }
         }
@@ -87,17 +108,12 @@ router.post(
     }
 
     // ── Lock the key before any side effect ──────────────────────────────────
-    // Any concurrent request with the same key will hit the "inflight" branch above
-    // and wait on this promise rather than starting a second order creation.
     let resolveKey!: (orderId: string) => void;
     let rejectKey!: (err: unknown) => void;
     const inflightPromise = new Promise<string>((resolve, reject) => {
       resolveKey = resolve;
       rejectKey = reject;
     });
-    // Attach a no-op catch so Node never sees this as an unhandled rejection,
-    // even if no concurrent request is awaiting it when it is rejected.
-    // Actual waiters that await the promise receive the rejection normally.
     inflightPromise.catch(() => {});
 
     if (idempotencyKey) {
@@ -144,13 +160,15 @@ router.post(
         bukti_filename: buktFilename,
         bukti_url: buktUrl,
         status: "baru",
+        // Initialise email tracking — will be updated after send attempt below
+        buyer_email_sent: false,
+        buyer_email_error: null,
       })
       .select()
       .single();
 
     if (dbError) {
       console.error("[orders] DB insert error:", dbError);
-      // Reject the in-flight promise so waiting retries can attempt again.
       if (idempotencyKey) {
         rejectKey(dbError);
         idempotencyCache.delete(idempotencyKey);
@@ -168,8 +186,7 @@ router.post(
       });
     }
 
-    // Send email notification to admin (best-effort)
-    sendOrderNotification({
+    const emailData: OrderEmailData = {
       orderId: order.id,
       namaPerusahaan: nama_perusahaan,
       namaPic: nama_pic,
@@ -178,19 +195,17 @@ router.post(
       produk,
       catatan,
       buktUrl: buktUrl ?? undefined,
-    }).catch((e) => console.error("[orders] Email notification error:", e));
+    };
 
-    // Send confirmation email to buyer (best-effort)
-    sendBuyerConfirmation({
-      orderId: order.id,
-      namaPerusahaan: nama_perusahaan,
-      namaPic: nama_pic,
-      email,
-      whatsapp,
-      produk,
-      catatan,
-      buktUrl: buktUrl ?? undefined,
-    }).catch((e) => console.error("[orders] Buyer confirmation email error:", e));
+    // Send notification to admin (best-effort, not tracked)
+    sendOrderNotification(emailData).catch((e) =>
+      console.error("[orders] Admin email notification error:", e)
+    );
+
+    // Send buyer confirmation and persist the send status in the DB
+    sendAndTrackBuyerEmail(order.id, emailData).catch((e) =>
+      console.error("[orders] sendAndTrackBuyerEmail unexpected error:", e)
+    );
 
     return res.status(201).json({ ok: true, order_id: order.id });
   }
@@ -219,6 +234,7 @@ router.get("/pesanan/:id", async (req, res) => {
 });
 
 // ─── GET /api/admin/orders ────────────────────────────────────────────────────
+// Returns all columns including buyer_email_sent and buyer_email_error.
 router.get("/admin/orders", requireAdmin, async (_req, res) => {
   const { data, error } = await supabase
     .from("orders")
@@ -252,6 +268,60 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
     return res.status(500).json({ error: "Gagal memperbarui status." });
   }
   return res.json(data);
+});
+
+// ─── POST /api/admin/orders/:id/retry-buyer-email ────────────────────────────
+// Allows an admin to manually resend the buyer confirmation for a failed order.
+router.post("/admin/orders/:id/retry-buyer-email", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  // Fetch the order (need all fields to rebuild email payload)
+  const { data: order, error: fetchError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json({ error: "Gagal memuat pesanan." });
+  }
+  if (!order) {
+    return res.status(404).json({ error: "Pesanan tidak ditemukan." });
+  }
+
+  if (order.buyer_email_sent === true) {
+    return res.status(409).json({ error: "Email konfirmasi sudah berhasil terkirim sebelumnya." });
+  }
+
+  const emailData: OrderEmailData = {
+    orderId: order.id,
+    namaPerusahaan: order.nama_perusahaan,
+    namaPic: order.nama_pic,
+    email: order.email,
+    whatsapp: order.whatsapp,
+    produk: order.produk,
+    catatan: order.catatan ?? undefined,
+    buktUrl: order.bukti_url ?? undefined,
+  };
+
+  try {
+    await sendBuyerConfirmation(emailData);
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({ buyer_email_sent: true, buyer_email_error: null })
+      .eq("id", id);
+    if (updateError) {
+      console.error("[orders] retry: failed to update buyer_email_sent:", updateError.message);
+    }
+    return res.json({ ok: true, message: "Email konfirmasi berhasil dikirim ulang." });
+  } catch (e: any) {
+    const errMsg = e?.message ?? String(e);
+    await supabase
+      .from("orders")
+      .update({ buyer_email_sent: false, buyer_email_error: errMsg })
+      .eq("id", id);
+    return res.status(502).json({ error: `Gagal mengirim email: ${errMsg}` });
+  }
 });
 
 export default router;
