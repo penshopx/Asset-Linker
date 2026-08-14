@@ -20,6 +20,10 @@ author = "agent"
 task = "workflow.run"
 args = "simulator-tests"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "mobile-tests"
+
 [[workflows.workflow]]
 name = "simulator-tests"
 author = "agent"
@@ -27,6 +31,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/lkut-simulator run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "mobile-tests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/lkut-mobile run test"
 
 [workflows.workflow.metadata]
 isValidation = true
