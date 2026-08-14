@@ -176,6 +176,9 @@ router.post(
       return res.status(500).json({ error: "Gagal menyimpan pesanan. Coba lagi." });
     }
 
+    // ── History is recorded automatically by the orders_status_history DB trigger ─
+    // No explicit write needed here.
+
     // ── Fulfil the promise and promote the entry to "done" ───────────────────
     resolveKey(order.id);
     if (idempotencyKey) {
@@ -215,22 +218,37 @@ router.post(
 router.get("/pesanan/:id", async (req, res) => {
   const { id } = req.params;
 
-  const { data, error } = await supabase
-    .from("orders")
-    .select("id, status, produk, created_at, updated_at")
-    .eq("id", id)
-    .maybeSingle();
+  const [orderResult, historyResult] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("id, status, produk, created_at, updated_at")
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("status_history")
+      .select("status, changed_at")
+      .eq("order_id", id)
+      .order("changed_at", { ascending: true }),
+  ]);
 
-  if (error) {
-    console.error("[orders] GET pesanan error:", error);
+  if (orderResult.error) {
+    console.error("[orders] GET pesanan error:", orderResult.error);
     return res.status(500).json({ error: "Gagal memuat data pesanan. Coba lagi nanti." });
   }
 
-  if (!data) {
+  if (!orderResult.data) {
     return res.status(404).json({ error: "Pesanan tidak ditemukan." });
   }
 
-  return res.json(data);
+  if (historyResult.error) {
+    console.error("[orders] GET status history error:", historyResult.error);
+    return res.status(500).json({ error: "Gagal memuat riwayat status. Coba lagi nanti." });
+  }
+
+  return res.json({
+    ...orderResult.data,
+    history: historyResult.data,
+  });
 });
 
 // ─── GET /api/admin/orders ────────────────────────────────────────────────────
@@ -267,6 +285,8 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
   if (error) {
     return res.status(500).json({ error: "Gagal memperbarui status." });
   }
+
+  // History is recorded automatically by the orders_status_history DB trigger.
 
   // Send status-change notification to buyer (best-effort — never fails the response)
   sendStatusUpdate({

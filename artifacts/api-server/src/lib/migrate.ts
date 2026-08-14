@@ -17,6 +17,54 @@ const MIGRATION_SQL = `
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS buyer_email_sent  BOOLEAN DEFAULT FALSE NOT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_error TEXT    DEFAULT NULL;
+
+CREATE TABLE IF NOT EXISTS status_history (
+  id         BIGSERIAL    PRIMARY KEY,
+  order_id   UUID         NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  status     TEXT         NOT NULL,
+  changed_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS status_history_order_id_idx ON status_history (order_id, changed_at);
+
+ALTER TABLE status_history ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'status_history' AND policyname = 'status_history_anon_select'
+  ) THEN
+    CREATE POLICY "status_history_anon_select"
+      ON status_history FOR SELECT USING (true);
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION record_status_history()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO status_history (order_id, status) VALUES (NEW.id, NEW.status);
+  ELSIF TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
+    INSERT INTO status_history (order_id, status) VALUES (NEW.id, NEW.status);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'orders_status_history'
+      AND tgrelid = 'orders'::regclass
+  ) THEN
+    CREATE TRIGGER orders_status_history
+      AFTER INSERT OR UPDATE OF status ON orders
+      FOR EACH ROW EXECUTE FUNCTION record_status_history();
+  END IF;
+END $$;
 `;
 
 export async function applyMigrations(): Promise<void> {

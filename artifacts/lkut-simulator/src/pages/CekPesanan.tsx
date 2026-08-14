@@ -5,20 +5,27 @@ const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 type OrderStatus = 'baru' | 'diproses' | 'selesai' | 'dibatalkan';
 
+interface StatusHistoryEntry {
+  status: OrderStatus;
+  changed_at: string;
+}
+
 interface OrderData {
   id: string;
   status: OrderStatus;
   produk: string;
   created_at: string;
   updated_at: string;
+  history: StatusHistoryEntry[];
 }
 
-const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
+const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: string; border: string; dot: string; Icon: React.ElementType }> = {
   baru: {
     label: 'Pesanan Baru',
     color: 'text-blue-700',
     bg: 'bg-blue-50',
     border: 'border-blue-200',
+    dot: 'bg-blue-500',
     Icon: Clock,
   },
   diproses: {
@@ -26,6 +33,7 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: str
     color: 'text-amber-700',
     bg: 'bg-amber-50',
     border: 'border-amber-200',
+    dot: 'bg-amber-500',
     Icon: Package,
   },
   selesai: {
@@ -33,6 +41,7 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: str
     color: 'text-emerald-700',
     bg: 'bg-emerald-50',
     border: 'border-emerald-200',
+    dot: 'bg-emerald-500',
     Icon: CheckCircle2,
   },
   dibatalkan: {
@@ -40,6 +49,7 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: str
     color: 'text-red-700',
     bg: 'bg-red-50',
     border: 'border-red-200',
+    dot: 'bg-red-500',
     Icon: XCircle,
   },
 };
@@ -62,7 +72,10 @@ async function fetchOrder(id: string): Promise<{ order?: OrderData; notFound?: b
       const json = await res.json().catch(() => ({}));
       return { error: (json as any).error ?? `Error ${res.status}` };
     }
-    return { order: await res.json() };
+    const data = await res.json();
+    // Ensure history is always an array
+    if (!Array.isArray(data.history)) data.history = [];
+    return { order: data };
   } catch (err: any) {
     return { error: err.message ?? 'Terjadi kesalahan. Coba lagi.' };
   }
@@ -192,6 +205,16 @@ export default function CekPesanan() {
                 </DetailRow>
               </div>
 
+              {/* Status timeline */}
+              {order.history.length > 0 && (
+                <div className="px-6 pb-5">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                    Riwayat Status
+                  </p>
+                  <StatusTimeline history={order.history} currentStatus={order.status} />
+                </div>
+              )}
+
               <div className="px-6 pb-5">
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
                   Ada pertanyaan? Hubungi tim kami via WhatsApp dengan menyertakan Order ID Anda.
@@ -210,6 +233,35 @@ export default function CekPesanan() {
         ← Kembali ke Simulator
       </a>
     </div>
+  );
+}
+
+function StatusTimeline({ history, currentStatus }: { history: StatusHistoryEntry[]; currentStatus: OrderStatus }) {
+  return (
+    <ol className="relative border-l border-slate-200 ml-2 space-y-0">
+      {history.map((entry, idx) => {
+        const cfg = STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.baru;
+        const isLast = idx === history.length - 1;
+        const Icon = cfg.Icon;
+        return (
+          <li key={idx} className={`ml-4 ${isLast ? 'pb-0' : 'pb-5'}`}>
+            {/* Dot on the timeline line */}
+            <span
+              className={`absolute -left-[9px] flex items-center justify-center w-[18px] h-[18px] rounded-full ring-2 ring-white ${isLast ? cfg.dot : 'bg-slate-300'}`}
+            />
+            <div className={`flex items-start gap-2 ${isLast ? '' : 'opacity-70'}`}>
+              <Icon className={`w-4 h-4 shrink-0 mt-0.5 ${isLast ? cfg.color : 'text-slate-400'}`} />
+              <div>
+                <p className={`text-sm font-semibold leading-tight ${isLast ? cfg.color : 'text-slate-500'}`}>
+                  {cfg.label}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">{formatDate(entry.changed_at)}</p>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
