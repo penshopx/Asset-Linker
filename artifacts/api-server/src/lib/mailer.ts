@@ -110,6 +110,97 @@ export async function sendBuyerConfirmation(data: OrderEmailData): Promise<void>
   });
 }
 
+export interface StatusUpdateEmailData {
+  orderId: string;
+  namaPerusahaan: string;
+  namaPic: string;
+  email: string;
+  produk: string;
+  newStatus: string;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  baru: "Baru",
+  diproses: "Sedang Diproses",
+  selesai: "Selesai ✅",
+  dibatalkan: "Dibatalkan ❌",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  baru: "#3b82f6",
+  diproses: "#f59e0b",
+  selesai: "#22c55e",
+  dibatalkan: "#ef4444",
+};
+
+export async function sendStatusUpdate(data: StatusUpdateEmailData): Promise<void> {
+  if (!resend) {
+    console.warn("[mailer] Skipping status update email — RESEND_API_KEY not set");
+    return;
+  }
+
+  const siteUrl = (process.env["SITE_URL"] ?? "https://dokumenproyek.com").replace(/\/$/, "");
+  const statusUrl = `${siteUrl}/cek-pesanan?id=${encodeURIComponent(data.orderId)}`;
+  const shortId = `#${data.orderId.slice(0, 8).toUpperCase()}`;
+  const statusLabel = STATUS_LABELS[data.newStatus] ?? data.newStatus;
+  const statusColor = STATUS_COLORS[data.newStatus] ?? "#64748b";
+
+  await sendOrThrow({
+    from: "DokumenProyek <noreply@dokumenproyek.com>",
+    to: data.email,
+    subject: `🔔 Status Pesanan Diperbarui — ${esc(data.produk)} (${shortId})`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #0f172a;">
+        <div style="background: #f59e0b; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; color: #0f172a; font-size: 22px;">DokumenProyek</h1>
+        </div>
+        <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <h2 style="margin-top: 0; color: #0f172a;">Status Pesanan Anda Diperbarui</h2>
+          <p style="color: #475569;">Halo <strong>${esc(data.namaPic)}</strong>,</p>
+          <p style="color: #475569;">Kami ingin memberitahu bahwa status pesanan Anda telah diperbarui.</p>
+
+          <div style="background: #f8fafc; border-radius: 8px; padding: 20px; margin: 24px 0;">
+            <h3 style="margin-top: 0; color: #0f172a; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;">Detail Pesanan</h3>
+            <table style="width:100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; width: 140px;">ID Pesanan</td>
+                <td style="padding: 6px 0; font-weight: 600;">${esc(shortId)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Nama Perusahaan</td>
+                <td style="padding: 6px 0;">${esc(data.namaPerusahaan)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Produk</td>
+                <td style="padding: 6px 0; font-weight: 600;">${esc(data.produk)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Status Terbaru</td>
+                <td style="padding: 6px 0;">
+                  <span style="background: ${statusColor}; color: #ffffff; padding: 3px 10px; border-radius: 9999px; font-size: 13px; font-weight: 600;">
+                    ${esc(statusLabel)}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="margin: 28px 0; text-align: center;">
+            <a href="${esc(safeUrl(statusUrl))}" style="background: #f59e0b; color: #0f172a; padding: 13px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; display: inline-block; font-size: 15px;">
+              Cek Status Pesanan →
+            </a>
+          </div>
+
+          <p style="color: #475569; margin-bottom: 0;">Salam,<br/><strong>Tim DokumenProyek</strong></p>
+        </div>
+        <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 16px;">
+          Email ini dikirim secara otomatis. Mohon tidak membalas email ini.
+        </p>
+      </div>
+    `,
+  });
+}
+
 export async function sendOrderNotification(data: OrderEmailData): Promise<void> {
   const adminEmail = process.env["ADMIN_EMAIL"];
 

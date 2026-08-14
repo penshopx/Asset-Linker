@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { supabase } from "../lib/supabase";
-import { sendOrderNotification, sendBuyerConfirmation, type OrderEmailData } from "../lib/mailer";
+import { sendOrderNotification, sendBuyerConfirmation, sendStatusUpdate, type OrderEmailData } from "../lib/mailer";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -267,6 +267,19 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
   if (error) {
     return res.status(500).json({ error: "Gagal memperbarui status." });
   }
+
+  // Send status-change notification to buyer (best-effort — never fails the response)
+  sendStatusUpdate({
+    orderId: data.id,
+    namaPerusahaan: data.nama_perusahaan,
+    namaPic: data.nama_pic,
+    email: data.email,
+    produk: data.produk,
+    newStatus: status,
+  }).catch((e) =>
+    console.error("[orders] Status update email failed:", e?.message ?? e)
+  );
+
   return res.json(data);
 });
 
