@@ -165,7 +165,7 @@ export function KonfirmasiPesananModal({
         {/* Body */}
         <div className="overflow-y-auto flex-1">
           {state === 'success' ? (
-            <SuccessView orderId={orderId} onClose={handleClose} />
+            <SuccessView orderId={orderId} produk={form.produk} onClose={handleClose} />
           ) : (
             <form onSubmit={handleSubmit} noValidate>
               <div className="p-6 space-y-4">
@@ -363,7 +363,7 @@ function inputCls(hasError: boolean) {
   } text-slate-900 placeholder-slate-400`;
 }
 
-function SuccessView({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
+function SuccessView({ orderId, produk, onClose }: { orderId: string | null; produk: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
   const statusUrl = orderId ? `${basePath}/cek-pesanan?id=${orderId}` : `${basePath}/cek-pesanan`;
@@ -383,6 +383,12 @@ function SuccessView({ orderId, onClose }: { orderId: string | null; onClose: ()
       </div>
       <div className="w-full">
         <h3 className="text-xl font-bold text-slate-900 mb-1">Pesanan Diterima! 🎉</h3>
+        {produk && (
+          <div className="mt-3 mb-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-left">
+            <p className="text-xs text-slate-500 mb-0.5">Produk / Layanan</p>
+            <p className="text-sm font-semibold text-slate-800">{produk}</p>
+          </div>
+        )}
         {orderId && (
           <div className="mt-2 mb-3">
             <p className="text-xs text-slate-500 mb-1.5">ID Pesanan (simpan untuk cek status):</p>
