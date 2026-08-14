@@ -10,10 +10,12 @@
  *   4. GET /api/pesanan/:id returns 500 when the history query fails.
  *   5. GET /api/pesanan/:id returns 404 when the order is not found.
  *   6. DB-backed idempotency via the RPC:
- *      a. Duplicate key (within TTL) → 200 with existing order_id.
- *      b. Expired key (> 10 min) → 201 with a fresh order_id.
- *      c. First request (no key in DB) → 201 with new order_id.
- *      d. Cross-process race (23505 on key insert) → retry succeeds → 200.
+ *      a. Duplicate key (within TTL) → 200 with existing order_id AND duplicate:true.
+ *      b. Expired key (> 10 min) → 201 with a fresh order_id, no duplicate flag.
+ *      c. First request (no key in DB) → 201 with new order_id, no duplicate flag.
+ *      d. Cross-process race (23505 on key insert) → retry succeeds → 200 with duplicate:true.
+ *   7. In-process in-flight idempotency:
+ *      a. Second concurrent request sharing a key → 200 with order_id AND duplicate:true.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -226,7 +228,7 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     mockFrom.mockReturnValue(buildQueryStub({ data: null, error: null }));
   });
 
-  it('returns the existing order (200) when the RPC reports is_duplicate=true — simulates post-restart replay', async () => {
+  it('returns the existing order (200) with duplicate:true when the RPC reports is_duplicate=true — simulates post-restart replay', async () => {
     // The DB function found a non-expired key and returned the existing order.
     mockRpc.mockResolvedValue(rpcDuplicate(FAKE_ORDER.id));
 
@@ -242,12 +244,14 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.order_id).toBe(FAKE_ORDER.id);
+    // Frontend uses this flag to show the "already received" message instead of "success" UI.
+    expect(res.body.duplicate).toBe(true);
 
     // RPC called exactly once; no emails triggered for a duplicate.
     expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 
-  it('creates a fresh order (201) when the RPC reports is_duplicate=false — expired key is cleaned up inside the DB function', async () => {
+  it('creates a fresh order (201) without duplicate flag — expired key is cleaned up inside the DB function', async () => {
     // The DB function deleted the expired key and created a new order atomically.
     const FRESH_ORDER_ID = 'fresh-order-uuid-456';
     mockRpc.mockResolvedValue(rpcNewOrder(FRESH_ORDER_ID));
@@ -264,9 +268,11 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     expect(res.status).toBe(201);
     expect(res.body.ok).toBe(true);
     expect(res.body.order_id).toBe(FRESH_ORDER_ID);
+    // Normal new-order response must NOT carry the duplicate flag.
+    expect(res.body.duplicate).toBeUndefined();
   });
 
-  it('creates a new order (201) when there is no existing key in the DB (first request)', async () => {
+  it('creates a new order (201) without duplicate flag when there is no existing key in the DB (first request)', async () => {
     mockRpc.mockResolvedValue(rpcNewOrder());
 
     const res = await request(app)
@@ -281,9 +287,10 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     expect(res.status).toBe(201);
     expect(res.body.ok).toBe(true);
     expect(res.body.order_id).toBe(FAKE_ORDER.id);
+    expect(res.body.duplicate).toBeUndefined();
   });
 
-  it('resolves a cross-process race: retries on 23505 and returns the winner (200)', async () => {
+  it('resolves a cross-process race: retries on 23505 and returns the winner (200) with duplicate:true', async () => {
     // First RPC call: the key insert inside the DB function raises a unique_violation
     // which rolls back the entire transaction (order + key). The app retries.
     // Second RPC call: winner's key is now in the table; DB function returns duplicate.
@@ -304,6 +311,8 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.order_id).toBe(WINNER_ID);
+    // Race-recovery loser is treated as a duplicate — user sees the "already received" message.
+    expect(res.body.duplicate).toBe(true);
 
     // The race-recovery retry must have fired (2 RPC calls total).
     expect(mockRpc).toHaveBeenCalledTimes(2);
@@ -314,6 +323,69 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     await new Promise((r) => setTimeout(r, 10));
     expect(sendOrderNotification).not.toHaveBeenCalled();
     expect(sendBuyerConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 with duplicate:true for a concurrent in-process request sharing the same idempotency key', async () => {
+    // This tests the inflightMap path: a second request arrives while the first
+    // is still awaiting the RPC. The second should coalesce onto the first's
+    // promise and return duplicate:true so the user sees the "already received" notice.
+
+    // Use a manually-controlled promise so the first request blocks at the RPC
+    // long enough for the second to register and find the inflight entry.
+    let resolveRpc!: (v: ReturnType<typeof rpcNewOrder>) => void;
+    const blockedRpc = new Promise<ReturnType<typeof rpcNewOrder>>((r) => { resolveRpc = r; });
+    mockRpc.mockReturnValueOnce(blockedRpc);
+
+    const SHARED_KEY = `inflight-test-key-${Date.now()}`;
+    const post = () =>
+      request(app)
+        .post('/api/konfirmasi-pesanan')
+        .set('x-idempotency-key', SHARED_KEY)
+        .field('nama_perusahaan', 'PT Test')
+        .field('nama_pic', 'Budi')
+        .field('email', 'budi@test.com')
+        .field('whatsapp', '08123456789')
+        .field('produk', 'Layanan A');
+
+    // SuperTest requests do not fire until awaited / .end() is called.
+    // We must call .end() on the first request NOW so it actually hits the
+    // server and registers in inflightMap before the second request arrives.
+    type SuResponse = import('supertest').Response;
+    const firstPromise = new Promise<SuResponse>((resolve, reject) =>
+      post().end((err, res) => (err ? reject(err) : resolve(res)))
+    );
+
+    // Wait for the first request to pass through multer, enter the route
+    // handler, and reach `await supabase.rpc(...)` (its suspension point).
+    await new Promise((r) => setTimeout(r, 40));
+
+    // Fire the second request — at this point inflightMap[key] is set.
+    const secondPromise = new Promise<SuResponse>((resolve, reject) =>
+      post().end((err, res) => (err ? reject(err) : resolve(res)))
+    );
+
+    // Give the second request time to find and await the inflight promise.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Resolve the RPC so both requests can complete.
+    resolveRpc(rpcNewOrder(FAKE_ORDER.id));
+
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    // First request: genuine new order (201, no duplicate flag).
+    expect(first.status).toBe(201);
+    expect(first.body.ok).toBe(true);
+    expect(first.body.order_id).toBe(FAKE_ORDER.id);
+    expect(first.body.duplicate).toBeUndefined();
+
+    // Second request: in-flight coalesced duplicate (200, duplicate:true).
+    expect(second.status).toBe(200);
+    expect(second.body.ok).toBe(true);
+    expect(second.body.order_id).toBe(FAKE_ORDER.id);
+    expect(second.body.duplicate).toBe(true);
+
+    // RPC called only once — the second request never reached the DB.
+    expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 
   it('returns 500 when the RPC fails with a non-race error', async () => {

@@ -38,6 +38,7 @@ export function KonfirmasiPesananModal({
   const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<FormState>('idle');
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [isDuplicate, setIsDuplicate] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
@@ -50,6 +51,7 @@ export function KonfirmasiPesananModal({
       setForm(prev => ({ ...prev, produk: defaultProduk }));
       setState('idle');
       setOrderId(null);
+      setIsDuplicate(false);
       setErrorMsg('');
       setFieldErrors({});
       setFile(null);
@@ -109,6 +111,7 @@ export function KonfirmasiPesananModal({
       }
 
       setOrderId((json as any).order_id ?? null);
+      setIsDuplicate(!!(json as any).duplicate);
       setState('success');
     } catch (err: any) {
       setErrorMsg(err.message ?? 'Terjadi kesalahan. Coba lagi.');
@@ -126,6 +129,7 @@ export function KonfirmasiPesananModal({
     setFile(null);
     setState('idle');
     setOrderId(null);
+    setIsDuplicate(false);
     setErrorMsg('');
     setFieldErrors({});
     onClose();
@@ -165,7 +169,7 @@ export function KonfirmasiPesananModal({
         {/* Body */}
         <div className="overflow-y-auto flex-1">
           {state === 'success' ? (
-            <SuccessView orderId={orderId} produk={form.produk} onClose={handleClose} />
+            <SuccessView orderId={orderId} produk={form.produk} isDuplicate={isDuplicate} onClose={handleClose} />
           ) : (
             <form onSubmit={handleSubmit} noValidate>
               <div className="p-6 space-y-4">
@@ -363,7 +367,17 @@ function inputCls(hasError: boolean) {
   } text-slate-900 placeholder-slate-400`;
 }
 
-function SuccessView({ orderId, produk, onClose }: { orderId: string | null; produk: string; onClose: () => void }) {
+function SuccessView({
+  orderId,
+  produk,
+  isDuplicate,
+  onClose,
+}: {
+  orderId: string | null;
+  produk: string;
+  isDuplicate: boolean;
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
   const statusUrl = orderId ? `${basePath}/cek-pesanan?id=${orderId}` : `${basePath}/cek-pesanan`;
@@ -378,11 +392,20 @@ function SuccessView({ orderId, produk, onClose }: { orderId: string | null; pro
 
   return (
     <div className="flex flex-col items-center justify-center py-12 px-8 text-center gap-5">
-      <div className="bg-emerald-100 rounded-full p-5">
-        <CheckCircle2 className="w-12 h-12 text-emerald-600" />
+      <div className={`${isDuplicate ? 'bg-blue-100' : 'bg-emerald-100'} rounded-full p-5`}>
+        <CheckCircle2 className={`w-12 h-12 ${isDuplicate ? 'text-blue-600' : 'text-emerald-600'}`} />
       </div>
       <div className="w-full">
-        <h3 className="text-xl font-bold text-slate-900 mb-1">Pesanan Diterima! 🎉</h3>
+        {isDuplicate ? (
+          <>
+            <h3 className="text-xl font-bold text-slate-900 mb-1">Pesanan sudah kami terima</h3>
+            <p className="text-slate-600 text-sm leading-relaxed mt-1">
+              Pesanan ini sudah pernah kami terima sebelumnya — berikut ID pesanan Anda.
+            </p>
+          </>
+        ) : (
+          <h3 className="text-xl font-bold text-slate-900 mb-1">Pesanan Diterima! 🎉</h3>
+        )}
         {produk && (
           <div className="mt-3 mb-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 text-left">
             <p className="text-xs text-slate-500 mb-0.5">Produk / Layanan</p>
@@ -405,14 +428,23 @@ function SuccessView({ orderId, produk, onClose }: { orderId: string | null; pro
             </div>
           </div>
         )}
-        <p className="text-slate-600 text-sm leading-relaxed">
-          Tim kami akan menghubungi Anda dalam <strong>1×24 jam</strong> melalui WhatsApp atau Email yang terdaftar.
-        </p>
+        {!isDuplicate && (
+          <p className="text-slate-600 text-sm leading-relaxed">
+            Tim kami akan menghubungi Anda dalam <strong>1×24 jam</strong> melalui WhatsApp atau Email yang terdaftar.
+          </p>
+        )}
       </div>
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 w-full">
-        <p className="font-semibold mb-0.5">Langkah selanjutnya:</p>
-        <p className="text-amber-700">Simpan ID pesanan Anda, dan pastikan WhatsApp Anda aktif agar konsultan kami bisa segera menjangkau Anda.</p>
-      </div>
+      {isDuplicate ? (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 w-full">
+          <p className="font-semibold mb-0.5">Pesanan sudah terdaftar</p>
+          <p className="text-blue-700">Gunakan ID pesanan di atas untuk memantau status terkini atau hubungi kami jika ada pertanyaan.</p>
+        </div>
+      ) : (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 w-full">
+          <p className="font-semibold mb-0.5">Langkah selanjutnya:</p>
+          <p className="text-amber-700">Simpan ID pesanan Anda, dan pastikan WhatsApp Anda aktif agar konsultan kami bisa segera menjangkau Anda.</p>
+        </div>
+      )}
       {orderId && (
         <a
           href={statusUrl}

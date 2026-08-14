@@ -75,7 +75,7 @@ router.post(
         console.log(`[orders] Idempotency hit (inflight) for key ${idempotencyKey}`);
         try {
           const orderId = await inflight;
-          return res.status(200).json({ ok: true, order_id: orderId });
+          return res.status(200).json({ ok: true, order_id: orderId, duplicate: true });
         } catch {
           inflightMap.delete(idempotencyKey);
           // First request failed — fall through to attempt a fresh RPC.
@@ -183,7 +183,7 @@ router.post(
     // ── Duplicate: order already existed — skip side effects ─────────────────
     if (isDuplicate) {
       console.log(`[orders] Idempotency hit (DB) for key ${idempotencyKey}, order ${orderId}`);
-      return res.status(200).json({ ok: true, order_id: orderId });
+      return res.status(200).json({ ok: true, order_id: orderId, duplicate: true });
     }
 
     // ── New order: send emails ────────────────────────────────────────────────
