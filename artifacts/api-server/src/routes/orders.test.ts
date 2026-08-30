@@ -42,6 +42,7 @@ vi.mock('../lib/supabase', () => ({
 vi.mock('../lib/mailer', () => ({
   sendOrderNotification: vi.fn().mockResolvedValue(undefined),
   sendBuyerConfirmation: vi.fn().mockResolvedValue(undefined),
+  sendBuyerEmailFailureNotification: vi.fn().mockResolvedValue(undefined),
   sendStatusUpdate: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -214,6 +215,39 @@ describe('POST /api/konfirmasi-pesanan — no direct status_history writes', () 
     // missing nama_pic, email, whatsapp, produk
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/konfirmasi-pesanan — buyer email failure notification', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFrom.mockReturnValue(buildQueryStub({ data: null, error: null }));
+  });
+
+  it('records the failure and notifies the admin without failing the order request', async () => {
+    const { sendBuyerConfirmation, sendBuyerEmailFailureNotification } = await import('../lib/mailer');
+    vi.mocked(sendBuyerConfirmation).mockRejectedValueOnce(new Error('Alamat email ditolak'));
+    mockRpc.mockResolvedValue(rpcNewOrder());
+
+    const res = await request(app)
+      .post('/api/konfirmasi-pesanan')
+      .field('nama_perusahaan', 'PT Test')
+      .field('nama_pic', 'Budi')
+      .field('email', 'invalid@example.com')
+      .field('whatsapp', '08123456789')
+      .field('produk', 'Layanan A');
+
+    expect(res.status).toBe(201);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockFrom).toHaveBeenCalledWith('orders');
+    expect(sendBuyerEmailFailureNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: FAKE_ORDER.id,
+        email: 'invalid@example.com',
+        error: 'Alamat email ditolak',
+      })
+    );
   });
 });
 

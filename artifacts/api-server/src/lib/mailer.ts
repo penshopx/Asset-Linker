@@ -241,3 +241,59 @@ export async function sendOrderNotification(data: OrderEmailData): Promise<void>
     `,
   });
 }
+
+export interface BuyerEmailFailureNotificationData extends OrderEmailData {
+  error: string;
+}
+
+/**
+ * Notify the admin separately when the buyer confirmation cannot be delivered.
+ * The order remains the source of truth for retrying, so this notification is
+ * best-effort and must never make the order request fail.
+ */
+export async function sendBuyerEmailFailureNotification(
+  data: BuyerEmailFailureNotificationData
+): Promise<void> {
+  const adminEmail = process.env["ADMIN_EMAIL"];
+
+  if (!resend || !adminEmail) {
+    console.warn(
+      "[mailer] Skipping buyer email failure notification — RESEND_API_KEY or ADMIN_EMAIL not set"
+    );
+    return;
+  }
+
+  const shortId = `#${data.orderId.slice(0, 8).toUpperCase()}`;
+  const waLink = `https://wa.me/${data.whatsapp.replace(/\D/g, "")}`;
+
+  await sendOrThrow({
+    from: "DokumenProyek <noreply@dokumenproyek.com>",
+    to: adminEmail,
+    subject: `⚠️ Email konfirmasi gagal: ${esc(data.produk)} — ${esc(data.namaPerusahaan)}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #0f172a;">
+        <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 24px 32px; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; color: #991b1b; font-size: 22px;">Email Konfirmasi Gagal Terkirim</h1>
+        </div>
+        <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <p style="color: #475569; margin-top: 0;">
+            Email konfirmasi untuk pesanan berikut tidak berhasil dikirim. Silakan buka dashboard admin untuk mencoba mengirim ulang.
+          </p>
+          <table style="width:100%; border-collapse: collapse; margin-top: 20px;">
+            <tr><td style="padding:8px; color:#64748b; width:160px;">ID Pesanan</td><td style="padding:8px; font-weight:600;">${esc(shortId)}</td></tr>
+            <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Nama Perusahaan</td><td style="padding:8px;">${esc(data.namaPerusahaan)}</td></tr>
+            <tr><td style="padding:8px; color:#64748b;">Nama PIC</td><td style="padding:8px;">${esc(data.namaPic)}</td></tr>
+            <tr style="background:#f8fafc;"><td style="padding:8px; color:#64748b;">Email Pembeli</td><td style="padding:8px;">${esc(data.email)}</td></tr>
+            <tr><td style="padding:8px; color:#64748b;">Produk</td><td style="padding:8px; font-weight:600;">${esc(data.produk)}</td></tr>
+            <tr style="background:#fef2f2;"><td style="padding:8px; color:#991b1b;">Alasan</td><td style="padding:8px; color:#991b1b;">${esc(data.error)}</td></tr>
+          </table>
+          <div style="margin-top: 24px;">
+            <a href="${esc(safeUrl(waLink))}" style="background:#22c55e; color:white; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600; display:inline-block;">
+              Hubungi PIC via WhatsApp
+            </a>
+          </div>
+        </div>
+      </div>
+    `,
+  });
+}

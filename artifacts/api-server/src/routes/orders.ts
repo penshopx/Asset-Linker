@@ -1,7 +1,13 @@
 import { Router } from "express";
 import multer from "multer";
 import { supabase } from "../lib/supabase";
-import { sendOrderNotification, sendBuyerConfirmation, sendStatusUpdate, type OrderEmailData } from "../lib/mailer";
+import {
+  sendOrderNotification,
+  sendBuyerConfirmation,
+  sendBuyerEmailFailureNotification,
+  sendStatusUpdate,
+  type OrderEmailData,
+} from "../lib/mailer";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -49,6 +55,10 @@ async function sendAndTrackBuyerEmail(
     if (error) {
       console.error("[orders] Failed to record buyer_email_error:", error.message);
     }
+
+    sendBuyerEmailFailureNotification({ ...emailData, error: errMsg }).catch((notificationError) =>
+      console.error("[orders] Admin buyer email failure notification error:", notificationError)
+    );
   }
 }
 

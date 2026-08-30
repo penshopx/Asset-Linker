@@ -1,0 +1,1 @@
+- [Buyer email failure alerts](buyer-email-failure-alerts.md) — alert hanya untuk status gagal dengan pesan error, bukan status false yang masih menunggu pengiriman.

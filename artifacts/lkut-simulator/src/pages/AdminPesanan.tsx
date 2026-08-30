@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Lock, RefreshCw, MessageCircle, ExternalLink, ChevronDown, Package, CheckCircle2, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { Lock, RefreshCw, MessageCircle, ExternalLink, ChevronDown, Package, CheckCircle2, Clock, XCircle, AlertCircle, MailWarning } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
@@ -17,6 +17,8 @@ interface Order {
   bukti_url?: string;
   bukti_filename?: string;
   status: OrderStatus;
+  buyer_email_sent?: boolean;
+  buyer_email_error?: string | null;
 }
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; icon: React.ReactNode }> = {
@@ -124,6 +126,10 @@ function StatusBadge({ status }: { status: OrderStatus }) {
 // ─── Order Row ────────────────────────────────────────────────────────────────
 function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: string; onUpdated: (updated: Order) => void }) {
   const [updating, setUpdating] = useState(false);
+  const [retryingEmail, setRetryingEmail] = useState(false);
+  const [retryError, setRetryError] = useState('');
+
+  const buyerEmailFailed = order.buyer_email_sent === false && Boolean(order.buyer_email_error);
 
   const updateStatus = async (newStatus: OrderStatus) => {
     if (newStatus === order.status) return;
@@ -140,6 +146,39 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
       }
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const retryBuyerEmail = async () => {
+    setRetryingEmail(true);
+    setRetryError('');
+    try {
+      const res = await fetch(`${API_BASE}/admin/orders/${order.id}/retry-buyer-email`, {
+        method: 'POST',
+        headers: { 'x-admin-passcode': passcode },
+      });
+      const body = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const message = body.error ?? 'Email gagal dikirim ulang.';
+        setRetryError(message);
+        onUpdated({
+          ...order,
+          buyer_email_sent: false,
+          buyer_email_error: message,
+        });
+        return;
+      }
+
+      onUpdated({
+        ...order,
+        buyer_email_sent: true,
+        buyer_email_error: null,
+      });
+    } catch {
+      setRetryError('Tidak dapat terhubung ke server. Coba lagi.');
+    } finally {
+      setRetryingEmail(false);
     }
   };
 
@@ -193,6 +232,34 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
         )}
       </div>
 
+      {buyerEmailFailed && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3" role="alert">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <MailWarning className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600" />
+              <div className="min-w-0">
+                <p className="font-semibold text-red-800">Email konfirmasi pembeli gagal terkirim</p>
+                <p className="mt-0.5 break-words text-xs text-red-700">
+                  {order.buyer_email_error}
+                </p>
+                {retryError && (
+                  <p className="mt-1 text-xs font-medium text-red-800" role="status">{retryError}</p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={retryBuyerEmail}
+              disabled={retryingEmail}
+              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
+              {retryingEmail ? 'Mengirim ulang…' : 'Coba kirim ulang'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Status selector */}
       <div className="flex items-center gap-2">
         <span className="text-slate-400 text-sm">Ubah status:</span>
@@ -221,6 +288,7 @@ function Dashboard({ passcode }: { passcode: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<OrderStatus | 'semua'>('semua');
+  const [showEmailFailures, setShowEmailFailures] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -240,11 +308,22 @@ function Dashboard({ passcode }: { passcode: string }) {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => { void fetchOrders(); }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [fetchOrders]);
+
   const handleUpdated = (updated: Order) => {
     setOrders(prev => prev.map(o => o.id === updated.id ? updated : o));
   };
 
-  const filtered = filter === 'semua' ? orders : orders.filter(o => o.status === filter);
+  const failedBuyerEmails = orders.filter(
+    order => order.buyer_email_sent === false && Boolean(order.buyer_email_error)
+  );
+  const filteredByStatus = filter === 'semua' ? orders : orders.filter(o => o.status === filter);
+  const filtered = showEmailFailures
+    ? filteredByStatus.filter(order => order.buyer_email_sent === false && Boolean(order.buyer_email_error))
+    : filteredByStatus;
 
   const counts = orders.reduce(
     (acc, o) => { acc[o.status] = (acc[o.status] ?? 0) + 1; return acc; },
@@ -296,6 +375,37 @@ function Dashboard({ passcode }: { passcode: string }) {
             </button>
           ))}
         </div>
+
+        {failedBuyerEmails.length > 0 && (
+          <div
+            className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 shadow-sm"
+            role="alert"
+            aria-live="polite"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-red-100 p-2 text-red-600">
+                  <MailWarning className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold">
+                    {failedBuyerEmails.length} email konfirmasi perlu perhatian
+                  </p>
+                  <p className="mt-1 text-sm text-red-700">
+                    Konfirmasi pembeli gagal terkirim. Coba kirim ulang dari baris pesanan yang bermasalah.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEmailFailures(current => !current)}
+                className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-800 transition-colors hover:bg-red-100"
+              >
+                {showEmailFailures ? 'Tampilkan semua pesanan' : 'Tampilkan yang gagal'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Orders list */}
         {error && (
