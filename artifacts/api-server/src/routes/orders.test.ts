@@ -434,25 +434,69 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 
-  it('creates a fresh order (201) without duplicate flag — expired key is cleaned up inside the DB function', async () => {
-    // The DB function deleted the expired key and created a new order atomically.
+  it('rejects a replay before the 10-minute TTL and creates a fresh order after it expires', async () => {
+    const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+    const START_TIME = Date.parse('2026-08-30T08:00:00.000Z');
+    const REUSED_KEY = 'test-key-expiry-boundary-001';
+    const FIRST_ORDER_ID = 'first-order-uuid-123';
     const FRESH_ORDER_ID = 'fresh-order-uuid-456';
-    mockRpc.mockResolvedValue(rpcNewOrder(FRESH_ORDER_ID));
+    let keyCreatedAt: number | undefined;
 
-    const res = await request(app)
-      .post('/api/konfirmasi-pesanan')
-      .set('x-idempotency-key', 'test-key-expired-001')
-      .field('nama_perusahaan', 'PT Test')
-      .field('nama_pic', 'Budi')
-      .field('email', 'budi@test.com')
-      .field('whatsapp', '08123456789')
-      .field('produk', 'Layanan A');
+    // Keep the RPC mock close to the DB function's behavior so this test
+    // exercises the complete request flow while controlling the clock:
+    // non-expired keys return the original order, while expired keys are
+    // replaced as part of creating a new order.
+    mockRpc.mockImplementation(
+      async (
+        _functionName: string,
+        params: { p_idempotency_key: string | null },
+      ) => {
+        const now = Date.now();
+        if (
+          params.p_idempotency_key === REUSED_KEY &&
+          keyCreatedAt !== undefined &&
+          keyCreatedAt > now - IDEMPOTENCY_TTL_MS
+        ) {
+          return rpcDuplicate(FIRST_ORDER_ID);
+        }
 
-    expect(res.status).toBe(201);
-    expect(res.body.ok).toBe(true);
-    expect(res.body.order_id).toBe(FRESH_ORDER_ID);
-    // Normal new-order response must NOT carry the duplicate flag.
-    expect(res.body.duplicate).toBeUndefined();
+        keyCreatedAt = now;
+        return rpcNewOrder(keyCreatedAt === START_TIME ? FIRST_ORDER_ID : FRESH_ORDER_ID);
+      },
+    );
+
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(START_TIME);
+    const submitWithReusedKey = () =>
+      request(app)
+        .post('/api/konfirmasi-pesanan')
+        .set('x-idempotency-key', REUSED_KEY)
+        .field('nama_perusahaan', 'PT Test')
+        .field('nama_pic', 'Budi')
+        .field('email', 'budi@test.com')
+        .field('whatsapp', '08123456789')
+        .field('produk', 'Layanan A');
+
+    try {
+      const first = await submitWithReusedKey();
+      expect(first.status).toBe(201);
+      expect(first.body.order_id).toBe(FIRST_ORDER_ID);
+      expect(first.body.duplicate).toBeUndefined();
+
+      dateNow.mockReturnValue(START_TIME + 9 * 60 * 1000);
+      const withinTtl = await submitWithReusedKey();
+      expect(withinTtl.status).toBe(200);
+      expect(withinTtl.body.order_id).toBe(FIRST_ORDER_ID);
+      expect(withinTtl.body.duplicate).toBe(true);
+
+      dateNow.mockReturnValue(START_TIME + 11 * 60 * 1000);
+      const afterTtl = await submitWithReusedKey();
+      expect(afterTtl.status).toBe(201);
+      expect(afterTtl.body.order_id).toBe(FRESH_ORDER_ID);
+      expect(afterTtl.body.duplicate).toBeUndefined();
+      expect(mockRpc).toHaveBeenCalledTimes(3);
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it('creates a new order (201) without duplicate flag when there is no existing key in the DB (first request)', async () => {
