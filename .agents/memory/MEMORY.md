@@ -1,4 +1,5 @@
 - [Buyer email failure alerts](buyer-email-failure-alerts.md) — alert hanya untuk status gagal dengan pesan error, bukan status false yang masih menunggu pengiriman.
 - [Buyer email retry ownership](buyer-email-retry-ownership.md) — retry memakai state persisten, claim bersyarat, dan idempotency provider agar aman lintas proses.
 - [Status email base URLs](status-email-base-urls.md) — tautan status email wajib berasal dari SITE_URL environment, tanpa fallback ke domain produksi.
+- [Optional status history](optional-status-history.md) — tabel riwayat yang belum termigrasi harus terdegradasi ke array kosong; error database lain tetap eksplisit.
 - [Workspace dependency linking](workspace-dependency-linking.md) — manifest dan lockfile bisa benar sementara symlink paket workspace tertinggal; pulihkan tanpa mengubah versi.

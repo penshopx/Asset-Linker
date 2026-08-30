@@ -8,14 +8,16 @@
  *   2. PATCH /admin/orders/:id/status never writes directly to status_history.
  *   3. GET /api/pesanan/:id includes the public order details and history array
  *      returned by the DB.
- *   4. GET /api/pesanan/:id returns 500 when the history query fails.
- *   5. GET /api/pesanan/:id returns 404 when the order is not found.
- *   6. DB-backed idempotency via the RPC:
+ *   4. GET /api/pesanan/:id returns history: [] for orders without history.
+ *   5. GET /api/pesanan/:id returns history: [] when the migration is missing.
+ *   6. GET /api/pesanan/:id returns 500 when the history query fails otherwise.
+ *   7. GET /api/pesanan/:id returns 404 when the order is not found.
+ *   8. DB-backed idempotency via the RPC:
  *      a. Duplicate key (within TTL) → 200 with existing order_id AND duplicate:true.
  *      b. Expired key (> 10 min) → 201 with a fresh order_id, no duplicate flag.
  *      c. First request (no key in DB) → 201 with new order_id, no duplicate flag.
  *      d. Cross-process race (23505 on key insert) → retry succeeds → 200 with duplicate:true.
- *   7. In-process in-flight idempotency:
+ *   9. In-process in-flight idempotency:
  *      a. Second concurrent request sharing a key → 200 with order_id AND duplicate:true.
  */
 
@@ -133,7 +135,37 @@ describe('GET /api/pesanan/:id', () => {
     expect(res.body.history[0].status).toBe('baru');
   });
 
-  it('returns 500 when the history query fails — does not silently return []', async () => {
+  it('returns history: [] when the order has no history rows', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
+      .mockReturnValueOnce(buildQueryStub({ data: [], error: null }));
+
+    const res = await request(app).get('/api/pesanan/order-uuid-123');
+
+    expect(res.status).toBe(200);
+    expect(res.body.history).toEqual([]);
+  });
+
+  it('returns history: [] when the status_history migration is not available yet', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
+      .mockReturnValueOnce(
+        buildQueryStub({
+          data: null,
+          error: {
+            code: 'PGRST205',
+            message: "Could not find the table 'public.status_history' in the schema cache",
+          },
+        })
+      );
+
+    const res = await request(app).get('/api/pesanan/order-uuid-123');
+
+    expect(res.status).toBe(200);
+    expect(res.body.history).toEqual([]);
+  });
+
+  it('returns 500 when the history query fails for an unrelated database error', async () => {
     mockFrom
       .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
       .mockReturnValueOnce(buildQueryStub({ data: null, error: { message: 'DB error' } }));
@@ -158,16 +190,23 @@ describe('GET /api/pesanan/:id', () => {
 describe('PATCH /api/admin/orders/:id/status — no direct status_history writes', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('does NOT write directly to the status_history table (trigger handles it)', async () => {
+  it('updates the order status so the database trigger records the new history row', async () => {
     mockFrom.mockReturnValue(
       buildQueryStub({ data: { ...FAKE_ORDER, status: 'diproses' }, error: null })
     );
 
-    await request(app)
+    const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
       .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
       .send({ status: 'diproses' });
 
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('diproses');
+    const orderUpdate = (mockFrom.mock.results[0]?.value as Record<string, ReturnType<typeof vi.fn>>)['update'];
+    expect(orderUpdate).toHaveBeenCalledWith({ status: 'diproses' });
+
+    // The trigger owns history insertion; the API must not bypass it with a
+    // direct write that would violate the table's RLS policy.
     const directTableWrites = mockFrom.mock.calls.filter(
       ([table]: [string]) => table === 'status_history'
     );
@@ -230,7 +269,7 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
 describe('POST /api/konfirmasi-pesanan — no direct status_history writes', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('uses the create_order_idempotent RPC and does NOT write to status_history directly', async () => {
+  it('uses the atomic order RPC whose insert trigger records the initial baru history row', async () => {
     // Order creation goes through the RPC (not from('orders').insert).
     // The only from() calls that should happen are for email tracking (orders.update).
     mockRpc.mockResolvedValue(rpcNewOrder());
@@ -247,7 +286,10 @@ describe('POST /api/konfirmasi-pesanan — no direct status_history writes', () 
     // RPC must have been called once
     expect(mockRpc).toHaveBeenCalledWith(
       'create_order_idempotent',
-      expect.objectContaining({ p_nama_perusahaan: 'PT Test' })
+      expect.objectContaining({
+        p_nama_perusahaan: 'PT Test',
+        p_produk: 'Layanan A',
+      })
     );
 
     // No direct writes to status_history

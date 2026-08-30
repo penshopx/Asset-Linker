@@ -28,6 +28,17 @@ const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // mirrors the 10-min TTL in the DB f
 
 const inflightMap = new Map<string, Promise<string>>();
 
+function isMissingStatusHistoryTableError(error: unknown): boolean {
+  const dbError = error as { code?: string; message?: string } | null;
+  return (
+    dbError?.code === "PGRST205" ||
+    dbError?.code === "42P01" ||
+    (dbError?.message?.includes("status_history") === true &&
+      (dbError.message.includes("does not exist") ||
+        dbError.message.includes("schema cache")))
+  );
+}
+
 // ─── Auth middleware for admin routes ────────────────────────────────────────
 function requireAdmin(req: any, res: any, next: any) {
   const passcode = req.headers["x-admin-passcode"] as string | undefined;
@@ -223,14 +234,21 @@ router.get("/pesanan/:id", async (req, res) => {
     return res.status(404).json({ error: "Pesanan tidak ditemukan." });
   }
 
-  if (historyResult.error) {
+  if (historyResult.error && !isMissingStatusHistoryTableError(historyResult.error)) {
     console.error("[orders] GET status history error:", historyResult.error);
     return res.status(500).json({ error: "Gagal memuat riwayat status. Coba lagi nanti." });
   }
 
+  if (historyResult.error) {
+    // Older databases may not have run the status-history migration yet.
+    // The order itself is still useful, so let the client render its details
+    // without a timeline until the migration is applied.
+    console.warn("[orders] status_history table is unavailable; returning empty history");
+  }
+
   return res.json({
     ...orderResult.data,
-    history: historyResult.data,
+    history: Array.isArray(historyResult.data) ? historyResult.data : [],
   });
 });
 

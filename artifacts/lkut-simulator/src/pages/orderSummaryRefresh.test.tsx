@@ -90,6 +90,7 @@ afterEach(() => {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
 });
 
+
 describe('order summary refresh flow', () => {
   it('redirects a refreshed simulator success session to its saved status summary', async () => {
     Object.defineProperty(globalThis, 'sessionStorage', {
@@ -165,7 +166,41 @@ describe('order summary refresh flow', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('PT Contoh');
     expect(JSON.stringify(renderer.toJSON())).toContain('Sari');
     expect(JSON.stringify(renderer.toJSON())).toContain('Tanggal Pesanan');
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Riwayat Status');
     expect(storage.getItem(ORDER_SUMMARY_STORAGE_KEY)).toBeNull();
+    renderer.unmount();
+  });
+
+  it('renders order details without crashing when the API omits history', async () => {
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      configurable: true,
+      value: createSessionStorage(),
+    });
+    setBrowser('?id=order-456');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'order-456',
+        status: 'diproses',
+        produk: 'Paket Bisnis',
+        nama_perusahaan: 'PT Contoh',
+        nama_pic: 'Sari',
+        created_at: '2026-08-30T00:00:00.000Z',
+        updated_at: '2026-08-30T00:00:00.000Z',
+      }),
+    });
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const renderer = await renderPage(<CekPesanan />);
+    const rendered = JSON.stringify(renderer.toJSON());
+
+    expect(rendered).toContain('Status Pesanan');
+    expect(rendered).toContain('Sedang Diproses');
+    expect(rendered).not.toContain('Riwayat Status');
     renderer.unmount();
   });
 });
