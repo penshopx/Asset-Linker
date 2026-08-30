@@ -265,6 +265,50 @@ router.get("/admin/orders", requireAdmin, async (_req, res) => {
   return res.json(data);
 });
 
+// ─── GET /api/admin/orders/:id — order detail with status history ──────────────
+router.get("/admin/orders/:id", requireAdmin, async (req, res): Promise<void> => {
+  const { id } = req.params;
+  const [orderResult, historyResult] = await Promise.all([
+    supabase.from("orders").select("*").eq("id", id).maybeSingle(),
+    supabase
+      .from("status_history")
+      .select("status, changed_at")
+      .eq("order_id", id)
+      .order("changed_at", { ascending: true }),
+  ]);
+
+  if (orderResult.error) {
+    req.log.error({ orderId: id, error: orderResult.error }, "Failed to load admin order");
+    res.status(500).json({ error: "Gagal memuat data pesanan." });
+    return;
+  }
+
+  if (!orderResult.data) {
+    res.status(404).json({ error: "Pesanan tidak ditemukan." });
+    return;
+  }
+
+  if (historyResult.error && !isMissingStatusHistoryTableError(historyResult.error)) {
+    req.log.error(
+      { orderId: id, error: historyResult.error },
+      "Failed to load admin order status history",
+    );
+    res.status(500).json({ error: "Gagal memuat riwayat status. Coba lagi nanti." });
+    return;
+  }
+
+  if (historyResult.error) {
+    // Keep the order detail available while an older database catches up with
+    // the status-history migration.
+    req.log.warn({ orderId: id }, "status_history table is unavailable; returning empty history");
+  }
+
+  res.json({
+    ...orderResult.data,
+    history: Array.isArray(historyResult.data) ? historyResult.data : [],
+  });
+});
+
 // ─── PATCH /api/admin/orders/:id/status ──────────────────────────────────────
 router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
   const { id } = req.params;

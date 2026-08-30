@@ -187,6 +187,64 @@ describe('GET /api/pesanan/:id', () => {
   });
 });
 
+describe('GET /api/admin/orders/:id', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the order and status history in chronological order', async () => {
+    const history = [
+      { status: 'baru', changed_at: '2026-08-30T08:00:00.000Z' },
+      { status: 'diproses', changed_at: '2026-08-30T09:00:00.000Z' },
+    ];
+    mockFrom
+      .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
+      .mockReturnValueOnce(buildQueryStub({ data: history, error: null }));
+
+    const res = await request(app)
+      .get('/api/admin/orders/order-uuid-123')
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(FAKE_ORDER.id);
+    expect(res.body.history).toEqual(history);
+    expect(res.body.history[0].status).toBe('baru');
+    expect(mockFrom).toHaveBeenNthCalledWith(1, 'orders');
+    expect(mockFrom).toHaveBeenNthCalledWith(2, 'status_history');
+  });
+
+  it('returns 404 when the admin order does not exist', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildQueryStub({ data: null, error: null }))
+      .mockReturnValueOnce(buildQueryStub({ data: [], error: null }));
+
+    const res = await request(app)
+      .get('/api/admin/orders/nonexistent')
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns an empty history when the status-history migration is unavailable', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
+      .mockReturnValueOnce(
+        buildQueryStub({
+          data: null,
+          error: {
+            code: 'PGRST205',
+            message: "Could not find the table 'public.status_history' in the schema cache",
+          },
+        }),
+      );
+
+    const res = await request(app)
+      .get('/api/admin/orders/order-uuid-123')
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+
+    expect(res.status).toBe(200);
+    expect(res.body.history).toEqual([]);
+  });
+});
+
 describe('PATCH /api/admin/orders/:id/status — no direct status_history writes', () => {
   beforeEach(() => vi.clearAllMocks());
 

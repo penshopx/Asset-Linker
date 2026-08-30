@@ -1,9 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Lock, RefreshCw, MessageCircle, ExternalLink, ChevronDown, Package, CheckCircle2, Clock, XCircle, AlertCircle, MailWarning } from 'lucide-react';
+import { Lock, RefreshCw, MessageCircle, ExternalLink, ChevronDown, ChevronUp, History, Package, CheckCircle2, Clock, XCircle, AlertCircle, MailWarning } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 type OrderStatus = 'baru' | 'diproses' | 'selesai' | 'dibatalkan';
+
+interface StatusHistoryEntry {
+  status: OrderStatus;
+  changed_at: string;
+}
 
 interface Order {
   id: string;
@@ -129,8 +134,48 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
   const [updating, setUpdating] = useState(false);
   const [retryingEmail, setRetryingEmail] = useState(false);
   const [retryError, setRetryError] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [history, setHistory] = useState<StatusHistoryEntry[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const buyerEmailFailed = order.buyer_email_sent === false && Boolean(order.buyer_email_error);
+
+  const loadHistory = async (force = false) => {
+    if (historyLoaded && !force) return;
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const res = await fetch(`${API_BASE}/admin/orders/${encodeURIComponent(order.id)}`, {
+        headers: { 'x-admin-passcode': passcode },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error ?? 'Gagal memuat riwayat status.');
+      }
+      const entries = Array.isArray(body.history) ? body.history : [];
+      setHistory(
+        entries
+          .filter((entry: any) => entry && typeof entry.status === 'string' && entry.changed_at)
+          .sort(
+            (a: StatusHistoryEntry, b: StatusHistoryEntry) =>
+              new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime(),
+          ),
+      );
+      setHistoryLoaded(true);
+    } catch (e: any) {
+      setHistoryError(e.message ?? 'Tidak dapat memuat riwayat status.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const toggleHistory = () => {
+    const nextOpen = !historyOpen;
+    setHistoryOpen(nextOpen);
+    if (nextOpen) void loadHistory();
+  };
 
   const updateStatus = async (newStatus: OrderStatus) => {
     if (newStatus === order.status) return;
@@ -144,6 +189,7 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
       if (res.ok) {
         const updated = await res.json();
         onUpdated(updated);
+        if (historyOpen) void loadHistory(true);
       }
     } finally {
       setUpdating(false);
@@ -273,6 +319,36 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
         </div>
       )}
 
+      <div className="mb-4 border-t border-slate-100 pt-3">
+        <button
+          type="button"
+          onClick={toggleHistory}
+          aria-expanded={historyOpen}
+          className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-slate-900"
+        >
+          <History className="h-4 w-4 text-slate-400" />
+          {historyOpen ? 'Sembunyikan riwayat status' : 'Lihat riwayat status'}
+          {historyOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+
+        {historyOpen && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            {historyLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Memuat riwayat…
+              </div>
+            ) : historyError ? (
+              <p className="text-sm text-red-700" role="alert">{historyError}</p>
+            ) : history.length === 0 ? (
+              <p className="text-sm text-slate-500">Belum ada riwayat perubahan status.</p>
+            ) : (
+              <StatusTimeline history={history} />
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Status selector */}
       <div className="flex items-center gap-2">
         <span className="text-slate-400 text-sm">Ubah status:</span>
@@ -292,6 +368,33 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
         {updating && <RefreshCw className="w-4 h-4 text-slate-400 animate-spin" />}
       </div>
     </div>
+  );
+}
+
+function StatusTimeline({ history }: { history: StatusHistoryEntry[] }) {
+  return (
+    <ol className="relative ml-2 border-l border-slate-200">
+      {history.map((entry, idx) => {
+        const cfg = STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.baru;
+        const isLast = idx === history.length - 1;
+        return (
+          <li key={`${entry.changed_at}-${idx}`} className={`ml-4 ${isLast ? 'pb-0' : 'pb-4'}`}>
+            <span
+              className={`absolute -left-[7px] h-3 w-3 rounded-full ring-2 ring-slate-50 ${isLast ? 'bg-amber-500' : 'bg-slate-300'}`}
+            />
+            <div className="flex items-start gap-2">
+              <span className={`${isLast ? 'text-slate-700' : 'text-slate-400'}`}>{cfg.icon}</span>
+              <div>
+                <p className={`text-sm font-semibold leading-tight ${isLast ? 'text-slate-700' : 'text-slate-500'}`}>
+                  {cfg.label}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-400">{formatDate(entry.changed_at)}</p>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
