@@ -4,6 +4,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ShieldCheck, Crosshair } from 'lucide-react';
 import { LkutFormData } from '@/types/lkut';
 import { captureFromURL, SniperAttribution } from '@/lib/sniper';
+import {
+  getOrderStatusUrl,
+  readOrderSummary,
+} from '@/lib/orderSummaryStorage';
 
 import { StepIndicator } from '@/components/simulator/StepIndicator';
 import { Step1Keuangan } from '@/components/simulator/steps/Step1Keuangan';
@@ -29,6 +33,12 @@ export default function Simulator() {
   const [attribution, setAttribution] = useState<SniperAttribution | null>(null);
 
   useEffect(() => {
+    const savedOrder = readOrderSummary();
+    if (savedOrder) {
+      window.location.replace(getOrderStatusUrl(import.meta.env.BASE_URL, savedOrder.orderId));
+      return;
+    }
+
     setAttribution(captureFromURL());
   }, []);
 

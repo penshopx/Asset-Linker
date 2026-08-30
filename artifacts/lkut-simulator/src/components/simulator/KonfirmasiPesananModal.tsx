@@ -1,5 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { X, Send, CheckCircle2, AlertCircle, Upload, Loader2, ShoppingCart, Copy, Check } from 'lucide-react';
+import {
+  clearOrderSummary,
+  getOrderStatusUrl,
+  saveOrderSummary,
+} from '@/lib/orderSummaryStorage';
 
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
@@ -110,7 +115,15 @@ export function KonfirmasiPesananModal({
         throw new Error((json as any).error ?? `Error ${res.status}`);
       }
 
-      setOrderId((json as any).order_id ?? null);
+      const submittedOrderId = typeof (json as any).order_id === 'string'
+        ? (json as any).order_id.trim()
+        : '';
+      const submittedProduk = form.produk.trim();
+
+      if (submittedOrderId) {
+        saveOrderSummary({ orderId: submittedOrderId, produk: submittedProduk });
+      }
+      setOrderId(submittedOrderId || null);
       setIsDuplicate(!!(json as any).duplicate);
       setState('success');
     } catch (err: any) {
@@ -132,6 +145,7 @@ export function KonfirmasiPesananModal({
     setIsDuplicate(false);
     setErrorMsg('');
     setFieldErrors({});
+    clearOrderSummary();
     onClose();
   };
 
@@ -380,7 +394,9 @@ function SuccessView({
 }) {
   const [copied, setCopied] = useState(false);
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
-  const statusUrl = orderId ? `${basePath}/cek-pesanan?id=${orderId}` : `${basePath}/cek-pesanan`;
+  const statusUrl = orderId
+    ? getOrderStatusUrl(basePath, orderId)
+    : `${basePath}/cek-pesanan`;
 
   const handleCopy = () => {
     if (!orderId) return;

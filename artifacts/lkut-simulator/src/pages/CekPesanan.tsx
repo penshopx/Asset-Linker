@@ -1,5 +1,12 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Package, Clock, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import {
+  clearOrderSummary,
+  clearOrderSummaryAfterSuccessfulLookup,
+  readOrderSummary,
+  readOrderSummaryForId,
+  type OrderSummary,
+} from '@/lib/orderSummaryStorage';
 
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
@@ -85,6 +92,7 @@ export default function CekPesanan() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<OrderData | null>(null);
+  const [savedSummary, setSavedSummary] = useState<OrderSummary | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -93,10 +101,15 @@ export default function CekPesanan() {
     const params = new URLSearchParams(window.location.search);
     const idParam = params.get('id');
     if (idParam) {
+      const matchingSummary = readOrderSummaryForId(idParam);
+      if (matchingSummary) setSavedSummary(matchingSummary);
       setInput(idParam);
       setLoading(true);
       fetchOrder(idParam).then(result => {
-        if (result.order) setOrder(result.order);
+        if (result.order) {
+          setOrder(result.order);
+          clearOrderSummaryAfterSuccessfulLookup(idParam);
+        }
         else if (result.notFound) setNotFound(true);
         else if (result.error) setErrorMsg(result.error);
         setLoading(false);
@@ -109,13 +122,20 @@ export default function CekPesanan() {
     const id = input.trim();
     if (!id) return;
 
+    const storedSummary = readOrderSummary();
+    const matchingSummary = readOrderSummaryForId(id);
+    setSavedSummary(matchingSummary);
+    if (storedSummary && !matchingSummary) clearOrderSummary();
     setLoading(true);
     setOrder(null);
     setNotFound(false);
     setErrorMsg('');
 
     const result = await fetchOrder(id);
-    if (result.order) setOrder(result.order);
+    if (result.order) {
+      setOrder(result.order);
+      clearOrderSummaryAfterSuccessfulLookup(id);
+    }
     else if (result.notFound) setNotFound(true);
     else if (result.error) setErrorMsg(result.error);
     setLoading(false);
@@ -159,7 +179,7 @@ export default function CekPesanan() {
         {/* Results */}
         <div className="mt-6">
           {/* Not found */}
-          {notFound && (
+          {notFound && !savedSummary && (
             <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 text-center">
               <AlertCircle className="w-10 h-10 text-slate-500 mx-auto mb-3" />
               <p className="text-slate-300 font-semibold">Pesanan tidak ditemukan</p>
@@ -168,10 +188,36 @@ export default function CekPesanan() {
           )}
 
           {/* Error */}
-          {errorMsg && (
+          {errorMsg && !savedSummary && (
             <div className="bg-red-900/30 border border-red-700 rounded-2xl p-4 flex items-start gap-3 text-sm text-red-300">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Local summary fallback when the status request is unavailable */}
+          {savedSummary && !order && (
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+              <div className="bg-blue-50 border-b border-blue-200 px-6 py-4 flex items-center gap-3">
+                <Package className="w-6 h-6 text-blue-700 shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">Ringkasan Pesanan</p>
+                  <p className="text-lg font-bold text-blue-700">Pesanan diterima</p>
+                </div>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <DetailRow label="Order ID">
+                  <span className="font-mono text-xs bg-slate-100 rounded px-2 py-0.5 text-slate-600 break-all">
+                    {savedSummary.orderId}
+                  </span>
+                </DetailRow>
+                <DetailRow label="Produk / Layanan">
+                  <span className="text-slate-800 text-sm font-medium">{savedSummary.produk}</span>
+                </DetailRow>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+                  Detail status belum dapat dimuat. Simpan Order ID ini dan coba lagi nanti.
+                </div>
+              </div>
             </div>
           )}
 
@@ -228,6 +274,7 @@ export default function CekPesanan() {
       {/* Back link */}
       <a
         href={import.meta.env.BASE_URL || '/'}
+        onClick={clearOrderSummary}
         className="mt-10 text-slate-500 hover:text-slate-300 text-sm transition-colors"
       >
         ← Kembali ke Simulator
