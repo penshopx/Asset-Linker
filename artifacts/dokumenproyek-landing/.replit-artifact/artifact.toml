@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/dokumenproyek-landing/"
+title = "DokumenProyek Landing Page"
+description = "A high-conviction landing page for Indonesian construction companies to understand their LKUT readiness, run a grade simulation, and move toward clearer project documentation."
+version = "1.0.0"
+id = "artifacts/dokumenproyek-landing"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/dokumenproyek-landing/" ]
+localPort = 25262
+
+[services.development]
+run = "pnpm --filter @workspace/dokumenproyek-landing run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dokumenproyek-landing", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/dokumenproyek-landing/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25262"
+BASE_PATH = "/dokumenproyek-landing/"

@@ -1,0 +1,29 @@
+kind = "video"
+previewPath = "/dokumenproyek-motion/"
+title = "DokumenProyek Brand Motion"
+description = "A looping 16:9 motion graphics piece that introduces DokumenProyek as a confident diagnostic companion for Indonesian construction companies and guides viewers from operational doubt toward a clearer next step."
+version = "1.0.0"
+id = "artifacts/dokumenproyek-motion"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/dokumenproyek-motion/" ]
+localPort = 23302
+
+[services.development]
+run = "pnpm --filter @workspace/dokumenproyek-motion run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dokumenproyek-motion", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/dokumenproyek-motion/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23302"
+BASE_PATH = "/dokumenproyek-motion/"
+videoAspectRatio = "16:9"

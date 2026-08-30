@@ -1,0 +1,9 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "LkZdkDb4G4GikuUa2JKMC"
+uri = "file://artifacts/dokumenproyek-motion/public/audio/bg_music.mp3"
+type = "audio"
+title = "background music"
+description = "Generated music: Instrumental cinematic minimal electronic score for a high-trust Indonesian construction operations brand film. Deep analog pulse, restrained piano tones, brushed industrial percussi…"
