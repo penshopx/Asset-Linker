@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -13,6 +13,7 @@ import {
   getGradeColor,
 } from '@/lib/lkutCalculator';
 import { getSalesAlerts, TriggerAlert } from '@/lib/salesEngine';
+import { KonfirmasiPesananModal } from '@/components/KonfirmasiPesananModal';
 
 const INDICATOR_NAMES: Record<string, string> = {
   assetGrowth: 'Pertumbuhan Aset',
@@ -76,6 +77,7 @@ interface Step4Props {
 export function Step4({ onReset }: Step4Props) {
   const colors = useColors();
   const { data } = useForm();
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
 
   const indicatorScores = {
     assetGrowth: calculateScore(data.assetGrowth || 0, THRESHOLDS.assetGrowth),
@@ -292,6 +294,42 @@ export function Step4({ onReset }: Step4Props) {
       </View>
 
       {/* CTAs */}
+      <View
+        style={[
+          styles.orderCard,
+          { backgroundColor: colors.accent, borderRadius: colors.radius },
+        ]}
+        testID="order-cta"
+      >
+        <View style={styles.orderCardCopy}>
+          <Text style={[styles.orderTitle, { color: colors.primary }]}>
+            Siap meningkatkan nilai LKUT?
+          </Text>
+          <Text style={[styles.orderBody, { color: colors.primary }]}>
+            Pesan layanan konsultasi atau dokumen langsung dari aplikasi.
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => {
+            setOrderModalOpen(true);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }}
+          style={({ pressed }) => [
+            styles.orderButton,
+            {
+              backgroundColor: pressed ? colors.secondary : colors.primary,
+              borderRadius: colors.radius,
+            },
+          ]}
+          testID="order-cta-btn"
+        >
+          <Ionicons name="cart-outline" size={17} color={colors.primaryForeground} />
+          <Text style={[styles.orderButtonText, { color: colors.primaryForeground }]}>
+            Konfirmasi Pesanan
+          </Text>
+        </Pressable>
+      </View>
+
       <View style={styles.ctaRow}>
         <Pressable
           onPress={() => { onReset(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
@@ -314,6 +352,13 @@ export function Step4({ onReset }: Step4Props) {
           <Text style={[styles.ctaBtnText, { color: '#fff' }]}>dp.dokumenproyek.com</Text>
         </Pressable>
       </View>
+
+      {orderModalOpen && (
+        <KonfirmasiPesananModal
+          visible
+          onClose={() => setOrderModalOpen(false)}
+        />
+      )}
     </View>
   );
 }
@@ -516,6 +561,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginBottom: 8,
+  },
+  orderCard: {
+    padding: 16,
+    marginBottom: 16,
+  },
+  orderCardCopy: {
+    marginBottom: 13,
+  },
+  orderTitle: {
+    fontSize: 16,
+    fontWeight: '800' as const,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
+  },
+  orderBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 3,
+    opacity: 0.85,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_400Regular' : undefined,
+  },
+  orderButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 14,
+  },
+  orderButtonText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    fontFamily: Platform.OS !== 'web' ? 'Inter_700Bold' : undefined,
   },
   ctaBtn: {
     flexDirection: 'row',

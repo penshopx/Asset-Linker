@@ -28,6 +28,14 @@ const colors = {
     destructive: '#ef4444',
     destructiveForeground: '#ffffff',
 
+    // Feedback states
+    success: '#059669',
+    successBackground: '#ecfdf5',
+    successBorder: '#a7f3d0',
+    info: '#2563eb',
+    infoBackground: '#eff6ff',
+    infoBorder: '#bfdbfe',
+
     // Borders/inputs
     border: '#e2e8f0',
     input: '#e2e8f0',
