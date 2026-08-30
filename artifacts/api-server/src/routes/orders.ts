@@ -39,6 +39,27 @@ function isMissingStatusHistoryTableError(error: unknown): boolean {
   );
 }
 
+async function cleanupUploadedProof(filename: string | null): Promise<void> {
+  if (!filename) {
+    return;
+  }
+
+  try {
+    const { error } = await supabase.storage.from("proofs").remove([filename]);
+    if (error) {
+      console.error("[orders] Failed to clean up uploaded proof", {
+        filename,
+        error: error.message,
+      });
+    }
+  } catch (error: unknown) {
+    console.error("[orders] Storage cleanup exception", {
+      filename,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 // ─── Auth middleware for admin routes ────────────────────────────────────────
 function requireAdmin(req: any, res: any, next: any) {
   const passcode = req.headers["x-admin-passcode"] as string | undefined;
@@ -96,6 +117,7 @@ router.post(
     // Happens before the atomic RPC so the URL can be included in the order row.
     let buktUrl: string | null = null;
     let buktFilename: string | null = null;
+    let uploadedProofFilename: string | null = null;
 
     if (req.file) {
       const ext = req.file.originalname.split(".").pop() ?? "bin";
@@ -113,6 +135,7 @@ router.post(
         if (uploadError) {
           console.warn("[orders] Storage upload failed, storing filename only:", uploadError.message);
         } else {
+          uploadedProofFilename = filename;
           const { data: urlData } = supabase.storage.from("proofs").getPublicUrl(filename);
           buktUrl = urlData?.publicUrl ?? null;
         }
@@ -159,6 +182,7 @@ router.post(
 
     if (rpcError) {
       console.error("[orders] create_order_idempotent error:", rpcError);
+      await cleanupUploadedProof(uploadedProofFilename);
       if (idempotencyKey) {
         rejectInflight(rpcError);
         inflightMap.delete(idempotencyKey);
@@ -179,6 +203,9 @@ router.post(
     // ── Duplicate: order already existed — skip side effects ─────────────────
     if (isDuplicate) {
       console.log(`[orders] Idempotency hit (DB) for key ${idempotencyKey}, order ${orderId}`);
+      // This request uploaded its own proof before discovering that another
+      // request already created the order. It must not leave an orphan file.
+      await cleanupUploadedProof(uploadedProofFilename);
       return res.status(200).json({ ok: true, order_id: orderId, duplicate: true });
     }
 

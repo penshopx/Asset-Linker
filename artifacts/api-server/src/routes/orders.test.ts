@@ -27,17 +27,16 @@ import request from 'supertest';
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 const mockRpc = vi.fn();
 const mockFrom = vi.fn();
+const mockStorageFrom = vi.fn();
+const mockStorageUpload = vi.fn();
+const mockStorageRemove = vi.fn();
+const mockGetPublicUrl = vi.fn();
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
     rpc: mockRpc,
     from: mockFrom,
-    storage: {
-      from: vi.fn().mockReturnValue({
-        upload: vi.fn().mockResolvedValue({ error: null }),
-        getPublicUrl: vi.fn().mockReturnValue({ data: { publicUrl: null } }),
-      }),
-    },
+    storage: { from: mockStorageFrom },
   },
 }));
 
@@ -75,6 +74,17 @@ const FAKE_ORDER = {
 const FAKE_HISTORY = [
   { status: 'baru', changed_at: new Date().toISOString() },
 ];
+
+beforeEach(() => {
+  mockStorageUpload.mockResolvedValue({ error: null });
+  mockStorageRemove.mockResolvedValue({ error: null });
+  mockGetPublicUrl.mockReturnValue({ data: { publicUrl: null } });
+  mockStorageFrom.mockReturnValue({
+    upload: mockStorageUpload,
+    remove: mockStorageRemove,
+    getPublicUrl: mockGetPublicUrl,
+  });
+});
 
 /** RPC result rows for a brand-new order (is_duplicate = false). */
 function rpcNewOrder(orderId = FAKE_ORDER.id) {
@@ -629,5 +639,33 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
 
     expect(res.status).toBe(500);
     expect(res.body.error).toMatch(/gagal/i);
+  });
+
+  it('deletes an uploaded proof when the DB insert fails after storage succeeds', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: 'PGRST301', message: 'DB unavailable' },
+    });
+    vi.spyOn(Date, 'now').mockReturnValue(1725000000000);
+
+    try {
+      const res = await request(app)
+        .post('/api/konfirmasi-pesanan')
+        .set('x-idempotency-key', 'test-key-upload-cleanup-001')
+        .field('nama_perusahaan', 'PT Test')
+        .field('nama_pic', 'Budi')
+        .field('email', 'budi@test.com')
+        .field('whatsapp', '08123456789')
+        .field('produk', 'Layanan A')
+        .attach('bukti_pembayaran', Buffer.from('proof'), 'proof.pdf');
+
+      expect(res.status).toBe(500);
+      expect(mockStorageUpload).toHaveBeenCalledTimes(1);
+      expect(mockStorageRemove).toHaveBeenCalledWith([
+        expect.stringMatching(/^1725000000000-[a-z0-9]+\.pdf$/),
+      ]);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
