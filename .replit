@@ -24,6 +24,10 @@ args = "simulator-tests"
 task = "workflow.run"
 args = "mobile-tests"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "simulator-typecheck"
+
 [[workflows.workflow]]
 name = "simulator-tests"
 author = "agent"
@@ -42,6 +46,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/lkut-mobile run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "simulator-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/lkut-simulator run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true
