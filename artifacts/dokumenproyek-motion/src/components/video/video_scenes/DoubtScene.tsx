@@ -50,7 +50,7 @@ export function DoubtScene() {
             exit={{ y: '-100%', opacity: 0 }}
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 1 }}
           >
-            Persiapan LKUT buram.
+            Kesiapan LKUT belum jelas.
           </motion.h1>
         </div>
         <div className="overflow-hidden">
@@ -61,7 +61,7 @@ export function DoubtScene() {
             exit={{ y: '-100%', opacity: 0 }}
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 1.4 }}
           >
-            Sinyal terpecah. Kepastian operasional meragukan.
+            Sinyal terpecah. Kelayakan LKUT masih meragukan.
           </motion.h2>
         </div>
       </div>

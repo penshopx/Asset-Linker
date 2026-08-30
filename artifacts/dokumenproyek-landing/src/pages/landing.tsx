@@ -18,7 +18,7 @@ export default function Landing() {
             href="/" 
             className="text-sm font-medium text-white bg-white/10 hover:bg-white/20 transition-colors px-5 py-2.5 rounded-full border border-white/5"
           >
-            Cek Kelayakan LKUT
+            Cek Kesiapan LKUT
           </a>
         </div>
       </nav>
@@ -38,7 +38,7 @@ export default function Landing() {
             >
               <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 text-blue-400 text-sm font-semibold mb-8 border border-blue-500/20 uppercase tracking-wider">
                 <Target className="w-4 h-4" />
-                Mitra Operasional Kontraktor
+                Pendamping Kesiapan LKUT
               </span>
             </motion.div>
 
@@ -48,7 +48,7 @@ export default function Landing() {
               transition={{ duration: 0.8, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
             >
               <h1 className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-display font-bold tracking-tight text-white leading-[1.05]">
-                Kesiapan Operasional, <br className="hidden sm:block" />
+                Kesiapan LKUT, <br className="hidden sm:block" />
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600">
                   Tanpa Ruang untuk Ragu.
                 </span>
@@ -61,7 +61,7 @@ export default function Landing() {
               transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
               className="mt-8 text-lg sm:text-xl text-slate-400 max-w-2xl leading-relaxed"
             >
-              DokumenProyek adalah pemandu andal bagi kontraktor dan tim BUJK. Kami membantu Anda memetakan risiko kelengkapan dokumen, mengevaluasi kelayakan LKUT, dan mengambil keputusan berbasis kepastian.
+              LKUT menentukan kesiapan kontraktor dan tim BUJK untuk melangkah dengan yakin. Petakan kelengkapan dokumen, evaluasi kelayakan, dan temukan prioritas perbaikan sebelum proses evaluasi dimulai.
             </motion.p>
 
             <motion.div
@@ -71,7 +71,7 @@ export default function Landing() {
               className="mt-12 flex flex-col sm:flex-row gap-4 w-full sm:w-auto"
             >
               <a href="/" className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-base font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 text-white shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] hover:bg-blue-500 hover:shadow-[0_0_60px_-15px_rgba(37,99,235,0.6)] hover:-translate-y-0.5 h-14 px-8 w-full sm:w-auto group">
-                Mulai Simulasi LKUT
+                Mulai Cek Kesiapan LKUT
                 <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </a>
               <a href="#solusi" className="inline-flex items-center justify-center whitespace-nowrap rounded-xl text-base font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:pointer-events-none disabled:opacity-50 border border-slate-700 bg-slate-900/50 text-slate-300 shadow-sm hover:bg-slate-800 hover:text-white h-14 px-8 w-full sm:w-auto">
@@ -92,12 +92,12 @@ export default function Landing() {
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.8, ease: "easeOut" }}
             >
-              <h2 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold text-slate-950 leading-[1.15]">
-                Celah kecil dalam dokumentasi bisa menunda pengerjaan berhari-hari.
+                <h2 className="text-4xl md:text-5xl lg:text-6xl font-display font-bold text-slate-950 leading-[1.15]">
+                Celah kecil dalam dokumen LKUT bisa menghambat langkah berikutnya.
               </h2>
               <div className="w-20 h-1.5 bg-blue-600 mt-8 mb-8 rounded-full" />
               <p className="text-xl text-slate-600 leading-relaxed">
-                Menyiapkan tender dan memulai proyek konstruksi membawa tekanan operasional yang besar. Kesiapan bukan sekadar tumpukan kertas. Ketidaksesuaian validasi tenaga ahli atau sertifikasi alat berat sering kali baru disadari saat waktu sudah mendesak.
+              Menyiapkan LKUT membawa tekanan operasional yang besar. Kesiapan bukan sekadar tumpukan kertas. Ketidaksesuaian tenaga ahli, sertifikasi, atau peralatan sering kali baru disadari saat proses evaluasi sudah dekat.
               </p>
             </motion.div>
             
@@ -105,18 +105,18 @@ export default function Landing() {
               <div className="absolute left-6 top-6 bottom-6 w-px bg-slate-100 hidden sm:block" />
               {[
                 {
-                  title: "Sertifikasi Tenaga Ahli (SKK)",
-                  desc: "Status SKK yang tidak terverifikasi dengan benar dapat menggugurkan kelayakan tim di lapangan sebelum proyek dimulai.",
+                title: "Kelengkapan Tenaga Ahli (SKK)",
+                desc: "Status SKK yang belum terverifikasi dapat mengurangi kesiapan LKUT dan menghambat validasi tim.",
                   icon: FileCheck
                 },
                 {
-                  title: "Kepatuhan Sistem (SMAP-SBU)",
-                  desc: "Standar manajemen anti penyuapan dan sertifikasi badan usaha yang memerlukan evaluasi serta pembaruan berkala.",
+                title: "Kepatuhan LKUT (SMAP-SBU)",
+                desc: "Standar manajemen anti penyuapan dan sertifikasi badan usaha yang perlu dipastikan sebelum LKUT dievaluasi.",
                   icon: ShieldCheck
                 },
                 {
-                  title: "Kesiapan Peralatan (SIMPK)",
-                  desc: "Kesesuaian identitas dan kelayakan operasi untuk alat berat yang sering lolos dari pantauan hingga inspeksi terjadi.",
+                title: "Kesiapan Peralatan (SIMPK)",
+                desc: "Kesesuaian identitas dan kelayakan operasi alat berat yang menjadi bagian penting dari kesiapan LKUT.",
                   icon: Truck
                 }
               ].map((item, i) => (
@@ -156,7 +156,7 @@ export default function Landing() {
               transition={{ duration: 0.8 }}
               className="text-4xl md:text-5xl lg:text-6xl font-display font-bold text-white leading-tight"
             >
-              Diagnosa Terarah, Tindakan Pasti.
+              Diagnosis LKUT Terarah, Tindakan Pasti.
             </motion.h2>
             <motion.p 
               initial={{ opacity: 0, y: 20 }}
@@ -165,25 +165,25 @@ export default function Landing() {
               transition={{ duration: 0.8, delay: 0.1 }}
               className="mt-6 text-xl text-slate-400 leading-relaxed"
             >
-              Dirancang khusus untuk menjawab tekanan lapangan para kontraktor Indonesia. Kami tidak menyajikan asumsi, melainkan jalur lurus dari pengecekan hingga pemenuhan standar.
+              Fokus pada apa yang menentukan kesiapan LKUT kontraktor Indonesia. Bukan asumsi, melainkan jalur lurus dari pengecekan hingga pemenuhan standar.
             </motion.p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
             {[
               {
-                title: "Diagnosa Mendalam",
-                desc: "Membedah kompleksitas persyaratan operasional menjadi poin-poin yang jernih, mudah dipahami, dan langsung dapat ditindaklanjuti.",
+                title: "Diagnosis Kesiapan LKUT",
+                desc: "Membedah persyaratan LKUT menjadi poin-poin yang jernih, mudah dipahami, dan langsung dapat ditindaklanjuti.",
                 icon: Layers
               },
               {
-                title: "Rekomendasi Prioritas",
-                desc: "Menerima panduan langkah demi langkah berdasarkan urgensi lapangan, memastikan operasional Anda tidak terhambat.",
+                title: "Prioritas Pemenuhan LKUT",
+                desc: "Menerima panduan langkah demi langkah berdasarkan urgensi, agar pemenuhan LKUT bergerak lebih terarah.",
                 icon: Target
               },
               {
-                title: "Simulasi Terintegrasi",
-                desc: "Transisi natural dari diagnosis kesiapan menuju simulasi kelayakan LKUT, memberikan gambaran utuh posisi perusahaan Anda.",
+                title: "Simulasi Kelayakan LKUT",
+                desc: "Bergerak dari diagnosis menuju simulasi kelayakan LKUT untuk melihat posisi kesiapan perusahaan secara utuh.",
                 icon: FileCheck
               }
             ].map((feature, i) => (
@@ -222,7 +222,7 @@ export default function Landing() {
               transition={{ duration: 0.7 }}
               className="text-4xl md:text-5xl lg:text-7xl font-display font-bold text-white leading-[1.1]"
             >
-              Waktunya berhenti menerka-nerka posisi perusahaan Anda.
+              Waktunya berhenti menerka-nerka kesiapan LKUT Anda.
             </motion.h2>
             <motion.p 
               initial={{ opacity: 0, y: 20 }}
@@ -231,7 +231,7 @@ export default function Landing() {
               transition={{ duration: 0.7, delay: 0.1 }}
               className="mt-8 text-xl md:text-2xl text-blue-100 max-w-2xl mx-auto leading-relaxed font-medium"
             >
-              Jangan tunggu hingga proses evaluasi menunda proyek berharga Anda. Gunakan simulator kami untuk memastikan kelayakan secara langsung.
+              Jangan tunggu hingga proses evaluasi mengungkap celah yang belum terlihat. Gunakan simulator untuk memeriksa kesiapan LKUT secara langsung.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 30 }}
@@ -241,7 +241,7 @@ export default function Landing() {
               className="mt-14"
             >
               <a href="/" className="inline-flex items-center justify-center whitespace-nowrap rounded-2xl text-lg font-bold transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/50 bg-slate-950 text-white shadow-2xl hover:bg-slate-900 hover:scale-[1.02] hover:shadow-[0_20px_40px_-15px_rgba(2,6,23,0.5)] h-20 px-12 group">
-                Hitung Kelayakan LKUT Sekarang
+                Cek Kesiapan LKUT Sekarang
                 <ArrowRight className="ml-4 w-7 h-7 group-hover:translate-x-2 transition-transform" />
               </a>
             </motion.div>
@@ -260,7 +260,7 @@ export default function Landing() {
               DokumenProyek
             </div>
             <p className="text-slate-500 font-medium text-center md:text-right">
-              Mitra operasional terpercaya untuk kontraktor Indonesia.
+              Pendamping kesiapan LKUT untuk kontraktor Indonesia.
             </p>
           </div>
         </div>

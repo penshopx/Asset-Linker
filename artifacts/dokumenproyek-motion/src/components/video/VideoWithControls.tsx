@@ -29,7 +29,7 @@ const SCENE_DETAILS: Record<
     filePath: 'src/components/video/video_scenes/PrioritiesScene.tsx',
   },
   closing: {
-    title: 'Penutup DokumenProyek',
+    title: 'Penutup LKUT',
     filePath: 'src/components/video/video_scenes/ClosingScene.tsx',
   },
 };

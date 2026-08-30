@@ -57,7 +57,7 @@ export function DiagnosticScene() {
           exit={{ opacity: 0, scale: 1.1, filter: 'blur(10px)' }}
           transition={{ duration: 1, ease: [0.16, 1, 0.3, 1], delay: 0.5 }}
         >
-          Satu diagnosis pasti.
+          Diagnosis kesiapan LKUT.
         </motion.h1>
       </div>
     </motion.div>

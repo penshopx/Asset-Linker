@@ -33,7 +33,7 @@ export function ClosingScene() {
             animate={{ y: '0%' }}
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.5 }}
           >
-            DokumenProyek
+            LKUT
           </motion.h1>
         </div>
 
@@ -44,7 +44,7 @@ export function ClosingScene() {
             animate={{ y: '0%', opacity: 1 }}
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 1 }}
           >
-            Langkah operasional Anda, dipastikan.
+            Kesiapan operasional Anda, dipastikan.
           </motion.p>
         </div>
       </div>

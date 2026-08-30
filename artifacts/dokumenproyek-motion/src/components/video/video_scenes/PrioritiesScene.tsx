@@ -33,7 +33,7 @@ export function PrioritiesScene() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
         >
-          Prioritas kini terarah.
+          Prioritas LKUT kini terarah.
         </motion.div>
 
         <div className="flex w-full justify-between items-end h-[30vh]">
