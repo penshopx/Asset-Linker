@@ -282,4 +282,24 @@ describe('Multiple alerts dapat aktif bersamaan', () => {
     expect(ids).not.toContain('tkk');
     expect(alerts).toHaveLength(1);
   });
+
+  it('returns a complete actionable shape for every recommendation', () => {
+    const alerts = getSalesAlerts(
+      { ...baseData(), skkMonthsLeft: 1, hasSmap: false },
+      redScores(),
+    );
+
+    for (const alert of alerts) {
+      expect(alert.title.trim()).not.toBe('');
+      expect(alert.body.trim()).not.toBe('');
+      expect(alert.products.length).toBeGreaterThan(0);
+      expect(alert.products.filter((product) => product.primary)).toHaveLength(1);
+
+      for (const product of alert.products) {
+        expect(product.label.trim()).not.toBe('');
+        expect(product.href).toMatch(/^https:\/\//);
+        expect(() => new URL(product.href)).not.toThrow();
+      }
+    }
+  });
 });
