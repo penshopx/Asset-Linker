@@ -270,16 +270,67 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
 
   // History is recorded automatically by the orders_status_history DB trigger.
 
-  sendStatusUpdate({
+  const statusEmailData = {
     orderId: data.id,
     namaPerusahaan: data.nama_perusahaan,
     namaPic: data.nama_pic,
     email: data.email,
     produk: data.produk,
     newStatus: status,
-  }).catch((e) =>
-    console.error("[orders] Status update email failed:", e?.message ?? e)
-  );
+  };
+
+  // Email delivery is best-effort: the status change has already been saved,
+  // so a rejected recipient address must not make the admin request fail.
+  // Keep the latest delivery result on the order so the admin can act on it.
+  void (async () => {
+    try {
+      await sendStatusUpdate(statusEmailData);
+
+      const { error: trackingError } = await supabase
+        .from("orders")
+        .update({ status_email_error: null })
+        .eq("id", data.id);
+
+      if (trackingError) {
+        console.error("[orders] Failed to clear status email error", {
+          orderId: data.id,
+          status,
+          error: trackingError.message,
+        });
+      }
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      console.error("[orders] Status update email failed", {
+        orderId: data.id,
+        status,
+        error: errorMessage,
+      });
+
+      try {
+        const { error: trackingError } = await supabase
+          .from("orders")
+          .update({ status_email_error: errorMessage })
+          .eq("id", data.id);
+
+        if (trackingError) {
+          console.error("[orders] Failed to record status email error", {
+            orderId: data.id,
+            status,
+            error: trackingError.message,
+          });
+        }
+      } catch (trackingException: unknown) {
+        console.error("[orders] Failed to record status email error", {
+          orderId: data.id,
+          status,
+          error:
+            trackingException instanceof Error
+              ? trackingException.message
+              : String(trackingException),
+        });
+      }
+    }
+  })();
 
   return res.json(data);
 });

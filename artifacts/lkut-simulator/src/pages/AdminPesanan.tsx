@@ -19,6 +19,7 @@ interface Order {
   status: OrderStatus;
   buyer_email_sent?: boolean;
   buyer_email_error?: string | null;
+  status_email_error?: string | null;
 }
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; icon: React.ReactNode }> = {
@@ -256,6 +257,18 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
               <RefreshCw className={`h-3.5 w-3.5 ${retryingEmail ? 'animate-spin' : ''}`} />
               {retryingEmail ? 'Mengirim ulang…' : 'Coba kirim ulang'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {order.status_email_error && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3" role="alert">
+          <div className="flex items-start gap-2.5">
+            <MailWarning className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+            <div className="min-w-0">
+              <p className="font-semibold text-amber-800">Email notifikasi status gagal terkirim</p>
+              <p className="mt-0.5 break-words text-xs text-amber-700">{order.status_email_error}</p>
+            </div>
           </div>
         </div>
       )}

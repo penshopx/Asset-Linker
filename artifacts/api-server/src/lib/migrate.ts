@@ -19,7 +19,8 @@ ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS buyer_email_error TEXT    DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_delivery_state TEXT DEFAULT 'pending' NOT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_retry_count INTEGER DEFAULT 0 NOT NULL,
-  ADD COLUMN IF NOT EXISTS buyer_email_last_attempt_at TIMESTAMPTZ DEFAULT NULL;
+  ADD COLUMN IF NOT EXISTS buyer_email_last_attempt_at TIMESTAMPTZ DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS status_email_error TEXT DEFAULT NULL;
 
 UPDATE orders
 SET buyer_email_delivery_state = CASE

@@ -65,6 +65,7 @@ const FAKE_ORDER = {
   bukti_filename: null,
   buyer_email_sent: false,
   buyer_email_error: null,
+  status_email_error: null,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
@@ -94,7 +95,7 @@ function buildQueryStub(resolveWith: { data?: unknown; error?: unknown }) {
   const chain = () => stub;
   stub['select'] = chain;
   stub['insert'] = chain;
-  stub['update'] = chain;
+  stub['update'] = vi.fn(chain);
   stub['upsert'] = chain;
   stub['delete'] = chain;
   stub['eq'] = chain;
@@ -180,6 +181,49 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
       .send({ status: 'invalid-status' });
 
     expect(res.status).toBe(400);
+  });
+
+  it('records a rejected status notification on the order without failing the status update', async () => {
+    const { sendStatusUpdate } = await import('../lib/mailer');
+    vi.mocked(sendStatusUpdate).mockRejectedValueOnce(new Error('Alamat email tidak valid'));
+    const query = buildQueryStub({
+      data: { ...FAKE_ORDER, status: 'diproses', status_email_error: null },
+      error: null,
+    });
+    mockFrom.mockReturnValue(query);
+
+    const res = await request(app)
+      .patch('/api/admin/orders/order-uuid-123/status')
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
+      .send({ status: 'diproses' });
+
+    expect(res.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockFrom).toHaveBeenCalledWith('orders');
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+    expect(query['update']).toHaveBeenCalledWith({
+      status_email_error: 'Alamat email tidak valid',
+    });
+  });
+
+  it('clears a previous status notification error after a successful send', async () => {
+    const { sendStatusUpdate } = await import('../lib/mailer');
+    vi.mocked(sendStatusUpdate).mockResolvedValueOnce(undefined);
+    const query = buildQueryStub({
+      data: { ...FAKE_ORDER, status: 'diproses', status_email_error: 'Previous failure' },
+      error: null,
+    });
+    mockFrom.mockReturnValue(query);
+
+    const res = await request(app)
+      .patch('/api/admin/orders/order-uuid-123/status')
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
+      .send({ status: 'diproses' });
+
+    expect(res.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockFrom).toHaveBeenCalledTimes(2);
+    expect(query['update']).toHaveBeenCalledWith({ status_email_error: null });
   });
 });
 

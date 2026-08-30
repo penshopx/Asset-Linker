@@ -1,6 +1,6 @@
 -- Run this once in the Supabase SQL editor to:
 --   1. Create the helper function used by the API server's auto-migration.
---   2. Add the two email-tracking columns to the orders table.
+--   2. Add the email-tracking columns to the orders table.
 --   3. Create the status_history table with RLS and an automatic trigger.
 
 -- Step 1: helper that lets the server apply DDL via rpc()
@@ -20,7 +20,8 @@ ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS buyer_email_error TEXT    DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_delivery_state TEXT DEFAULT 'pending' NOT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_retry_count INTEGER DEFAULT 0 NOT NULL,
-  ADD COLUMN IF NOT EXISTS buyer_email_last_attempt_at TIMESTAMPTZ DEFAULT NULL;
+  ADD COLUMN IF NOT EXISTS buyer_email_last_attempt_at TIMESTAMPTZ DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS status_email_error TEXT DEFAULT NULL;
 
 UPDATE orders
 SET buyer_email_delivery_state = CASE
