@@ -138,26 +138,33 @@ describe('order summary refresh flow', () => {
     const storage = createSessionStorage();
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage });
     setBrowser('?id=order-123');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'order-123',
+        status: 'baru',
+        produk: 'Paket SKK',
+        nama_perusahaan: 'PT Contoh',
+        nama_pic: 'Sari',
+        created_at: '2026-08-30T00:00:00.000Z',
+        updated_at: '2026-08-30T00:00:00.000Z',
+        history: [],
+      }),
+    });
     Object.defineProperty(globalThis, 'fetch', {
       configurable: true,
-      value: vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          id: 'order-123',
-          status: 'baru',
-          produk: 'Paket SKK',
-          created_at: '2026-08-30T00:00:00.000Z',
-          updated_at: '2026-08-30T00:00:00.000Z',
-          history: [],
-        }),
-      }),
+      value: fetchMock,
     });
     saveOrderSummary({ orderId: 'order-123', produk: 'Paket SKK' });
 
     const renderer = await renderPage(<CekPesanan />);
 
+    expect(fetchMock).toHaveBeenCalledWith('/api/pesanan/order-123');
     expect(JSON.stringify(renderer.toJSON())).toContain('Status Pesanan');
+    expect(JSON.stringify(renderer.toJSON())).toContain('PT Contoh');
+    expect(JSON.stringify(renderer.toJSON())).toContain('Sari');
+    expect(JSON.stringify(renderer.toJSON())).toContain('Tanggal Pesanan');
     expect(storage.getItem(ORDER_SUMMARY_STORAGE_KEY)).toBeNull();
     renderer.unmount();
   });

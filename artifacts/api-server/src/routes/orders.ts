@@ -204,7 +204,7 @@ router.get("/pesanan/:id", async (req, res) => {
   const [orderResult, historyResult] = await Promise.all([
     supabase
       .from("orders")
-      .select("id, status, produk, created_at, updated_at")
+      .select("id, status, produk, nama_perusahaan, nama_pic, created_at, updated_at")
       .eq("id", id)
       .maybeSingle(),
     supabase

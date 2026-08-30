@@ -21,6 +21,8 @@ interface OrderData {
   id: string;
   status: OrderStatus;
   produk: string;
+  nama_perusahaan: string;
+  nama_pic: string;
   created_at: string;
   updated_at: string;
   history: StatusHistoryEntry[];
@@ -242,6 +244,12 @@ export default function CekPesanan() {
                 </DetailRow>
                 <DetailRow label="Produk / Layanan">
                   <span className="text-slate-800 text-sm font-medium">{order.produk}</span>
+                </DetailRow>
+                <DetailRow label="Nama Perusahaan">
+                  <span className="text-slate-600 text-sm">{order.nama_perusahaan}</span>
+                </DetailRow>
+                <DetailRow label="Nama PIC">
+                  <span className="text-slate-600 text-sm">{order.nama_pic}</span>
                 </DetailRow>
                 <DetailRow label="Tanggal Pesanan">
                   <span className="text-slate-600 text-sm">{formatDate(order.created_at)}</span>

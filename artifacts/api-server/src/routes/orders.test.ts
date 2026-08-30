@@ -6,7 +6,8 @@
  *   1. POST /api/konfirmasi-pesanan uses the atomic `create_order_idempotent`
  *      RPC and never writes directly to status_history.
  *   2. PATCH /admin/orders/:id/status never writes directly to status_history.
- *   3. GET /api/pesanan/:id includes the history array returned by the DB.
+ *   3. GET /api/pesanan/:id includes the public order details and history array
+ *      returned by the DB.
  *   4. GET /api/pesanan/:id returns 500 when the history query fails.
  *   5. GET /api/pesanan/:id returns 404 when the order is not found.
  *   6. DB-backed idempotency via the RPC:
@@ -122,6 +123,10 @@ describe('GET /api/pesanan/:id', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.id).toBe('order-uuid-123');
+    expect(res.body.produk).toBe('Layanan A');
+    expect(res.body.nama_perusahaan).toBe('PT Test');
+    expect(res.body.nama_pic).toBe('Budi');
+    expect(res.body.created_at).toBe(FAKE_ORDER.created_at);
     expect(Array.isArray(res.body.history)).toBe(true);
     expect(res.body.history).toHaveLength(1);
     expect(res.body.history[0].status).toBe('baru');

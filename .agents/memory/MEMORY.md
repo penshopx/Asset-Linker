@@ -1,2 +1,3 @@
 - [Buyer email failure alerts](buyer-email-failure-alerts.md) — alert hanya untuk status gagal dengan pesan error, bukan status false yang masih menunggu pengiriman.
 - [Buyer email retry ownership](buyer-email-retry-ownership.md) — retry memakai state persisten, claim bersyarat, dan idempotency provider agar aman lintas proses.
+- [Workspace dependency linking](workspace-dependency-linking.md) — manifest dan lockfile bisa benar sementara symlink paket workspace tertinggal; pulihkan tanpa mengubah versi.
