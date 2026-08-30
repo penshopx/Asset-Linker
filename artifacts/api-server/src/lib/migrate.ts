@@ -16,7 +16,22 @@ import { supabase } from "./supabase";
 const MIGRATION_SQL = `
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS buyer_email_sent  BOOLEAN DEFAULT FALSE NOT NULL,
-  ADD COLUMN IF NOT EXISTS buyer_email_error TEXT    DEFAULT NULL;
+  ADD COLUMN IF NOT EXISTS buyer_email_error TEXT    DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS buyer_email_delivery_state TEXT DEFAULT 'pending' NOT NULL,
+  ADD COLUMN IF NOT EXISTS buyer_email_retry_count INTEGER DEFAULT 0 NOT NULL,
+  ADD COLUMN IF NOT EXISTS buyer_email_last_attempt_at TIMESTAMPTZ DEFAULT NULL;
+
+UPDATE orders
+SET buyer_email_delivery_state = CASE
+  WHEN buyer_email_sent = TRUE THEN 'sent'
+  WHEN buyer_email_error IS NOT NULL THEN 'failed'
+  ELSE buyer_email_delivery_state
+END
+WHERE buyer_email_delivery_state = 'pending';
+
+CREATE INDEX IF NOT EXISTS orders_buyer_email_retry_idx
+  ON orders (created_at, buyer_email_retry_count, buyer_email_delivery_state)
+  WHERE buyer_email_sent = FALSE;
 
 -- Remove the short-lived unique index/column added in an earlier migration attempt.
 DROP INDEX  IF EXISTS orders_idempotency_key_unique;

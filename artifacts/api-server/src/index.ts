@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { applyMigrations } from "./lib/migrate";
+import { startBuyerEmailRetryJob } from "./lib/buyer-email-retry";
 
 const rawPort = process.env["PORT"];
 
@@ -24,5 +25,6 @@ applyMigrations().then(() => {
     }
 
     logger.info({ port }, "Server listening");
+    startBuyerEmailRetryJob();
   });
 });

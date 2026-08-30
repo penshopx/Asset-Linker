@@ -42,9 +42,10 @@ function safeUrl(url: string | undefined | null): string {
 
 /** Send and throw if Resend returns an error result (not just a rejected promise). */
 async function sendOrThrow(
-  payload: Parameters<Resend["emails"]["send"]>[0]
+  payload: Parameters<Resend["emails"]["send"]>[0],
+  options?: Parameters<Resend["emails"]["send"]>[1],
 ): Promise<void> {
-  const { data, error } = await resend!.emails.send(payload);
+  const { data, error } = await resend!.emails.send(payload, options);
   if (error) {
     throw new Error(`Resend error: ${error.message ?? JSON.stringify(error)}`);
   }
@@ -61,11 +62,12 @@ export async function sendBuyerConfirmation(data: OrderEmailData): Promise<void>
 
   const shortId = `#${data.orderId.slice(0, 8).toUpperCase()}`;
 
-  await sendOrThrow({
-    from: "DokumenProyek <noreply@dokumenproyek.com>",
-    to: data.email,
-    subject: `✅ Pesanan Anda Diterima — ${esc(data.produk)} (${shortId})`,
-    html: `
+  await sendOrThrow(
+    {
+      from: "DokumenProyek <noreply@dokumenproyek.com>",
+      to: data.email,
+      subject: `✅ Pesanan Anda Diterima — ${esc(data.produk)} (${shortId})`,
+      html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #0f172a;">
         <div style="background: #f59e0b; padding: 24px 32px; border-radius: 8px 8px 0 0;">
           <h1 style="margin: 0; color: #0f172a; font-size: 22px;">DokumenProyek</h1>
@@ -107,7 +109,13 @@ export async function sendBuyerConfirmation(data: OrderEmailData): Promise<void>
         </p>
       </div>
     `,
-  });
+    },
+    {
+      // All attempts for one order share a key, so an ambiguous response or
+      // concurrent retry cannot create duplicate buyer confirmations.
+      idempotencyKey: `buyer-confirmation-${data.orderId}`,
+    },
+  );
 }
 
 export interface StatusUpdateEmailData {

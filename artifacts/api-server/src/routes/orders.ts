@@ -3,11 +3,17 @@ import multer from "multer";
 import { supabase } from "../lib/supabase";
 import {
   sendOrderNotification,
-  sendBuyerConfirmation,
-  sendBuyerEmailFailureNotification,
   sendStatusUpdate,
-  type OrderEmailData,
 } from "../lib/mailer";
+import {
+  orderToEmailData,
+  sendAndTrackBuyerEmail,
+} from "../lib/buyer-email";
+import {
+  claimBuyerEmailRetry,
+  type FailedBuyerEmailOrder,
+} from "../lib/buyer-email-retry";
+import type { OrderEmailData } from "../lib/mailer";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -29,37 +35,6 @@ function requireAdmin(req: any, res: any, next: any) {
     return res.status(401).json({ error: "Passcode salah atau tidak ada." });
   }
   next();
-}
-
-// ─── Helper: send buyer confirmation and persist the result ──────────────────
-async function sendAndTrackBuyerEmail(
-  orderId: string,
-  emailData: OrderEmailData
-): Promise<void> {
-  try {
-    await sendBuyerConfirmation(emailData);
-    const { error } = await supabase
-      .from("orders")
-      .update({ buyer_email_sent: true, buyer_email_error: null })
-      .eq("id", orderId);
-    if (error) {
-      console.error("[orders] Failed to record buyer_email_sent=true:", error.message);
-    }
-  } catch (e: any) {
-    const errMsg = e?.message ?? String(e);
-    console.error("[orders] Buyer confirmation email failed:", errMsg);
-    const { error } = await supabase
-      .from("orders")
-      .update({ buyer_email_sent: false, buyer_email_error: errMsg })
-      .eq("id", orderId);
-    if (error) {
-      console.error("[orders] Failed to record buyer_email_error:", error.message);
-    }
-
-    sendBuyerEmailFailureNotification({ ...emailData, error: errMsg }).catch((notificationError) =>
-      console.error("[orders] Admin buyer email failure notification error:", notificationError)
-    );
-  }
 }
 
 // ─── POST /api/konfirmasi-pesanan ─────────────────────────────────────────────
@@ -330,33 +305,36 @@ router.post("/admin/orders/:id/retry-buyer-email", requireAdmin, async (req, res
     return res.status(409).json({ error: "Email konfirmasi sudah berhasil terkirim sebelumnya." });
   }
 
-  const emailData: OrderEmailData = {
-    orderId: order.id,
-    namaPerusahaan: order.nama_perusahaan,
-    namaPic: order.nama_pic,
-    email: order.email,
-    whatsapp: order.whatsapp,
-    produk: order.produk,
-    catatan: order.catatan ?? undefined,
-    buktUrl: order.bukti_url ?? undefined,
-  };
+  const claim = await claimBuyerEmailRetry(order as FailedBuyerEmailOrder);
+  if (!claim.claimed) {
+    return res.status(409).json({
+      error:
+        claim.reason === "not-eligible"
+          ? "Email belum dapat dicoba ulang. Tunggu beberapa menit lalu coba lagi."
+          : "Email sedang dicoba ulang oleh proses lain. Muat ulang dan coba lagi.",
+    });
+  }
+
+  const emailData = orderToEmailData(claim.order);
 
   try {
-    await sendBuyerConfirmation(emailData);
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ buyer_email_sent: true, buyer_email_error: null })
-      .eq("id", id);
-    if (updateError) {
-      console.error("[orders] retry: failed to update buyer_email_sent:", updateError.message);
+    const result = await sendAndTrackBuyerEmail(
+      id,
+      emailData,
+      claim.retryCount,
+      claim.attemptedAt,
+    );
+    if (result.sent) {
+      return res.json({
+        ok: true,
+        message: "Email konfirmasi berhasil dikirim ulang.",
+      });
     }
-    return res.json({ ok: true, message: "Email konfirmasi berhasil dikirim ulang." });
-  } catch (e: any) {
-    const errMsg = e?.message ?? String(e);
-    await supabase
-      .from("orders")
-      .update({ buyer_email_sent: false, buyer_email_error: errMsg })
-      .eq("id", id);
+    return res
+      .status(502)
+      .json({ error: `Gagal mengirim email: ${result.error}` });
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
     return res.status(502).json({ error: `Gagal mengirim email: ${errMsg}` });
   }
 });
