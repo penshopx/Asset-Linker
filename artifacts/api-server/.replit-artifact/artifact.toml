@@ -10,7 +10,7 @@ name = "API Server"
 paths = ["/api"]
 
 [services.development]
-run = "pnpm --filter @workspace/api-server run dev"
+run = "SITE_URL=\"https://${REPLIT_DEV_DOMAIN}\" pnpm --filter @workspace/api-server run dev"
 
 [services.production]
 
@@ -27,6 +27,7 @@ args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 [services.production.run.env]
 PORT = "8080"
 NODE_ENV = "production"
+SITE_URL = "https://asset-linker-Esterkristian26.replit.app"
 
 [services.production.health.startup]
 path = "/api/healthz"

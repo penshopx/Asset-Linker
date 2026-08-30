@@ -9,7 +9,15 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required environment variables:
+  - `DATABASE_URL` — Postgres connection string (provided by Replit)
+  - `SITE_URL` — public base URL used in buyer order-status email links. It is configured in the API service definition at `artifacts/api-server/.replit-artifact/artifact.toml`:
+    - Development derives it from Replit's runtime-managed `REPLIT_DEV_DOMAIN`
+    - Production sets it to the deployment's primary URL
+  - `RESEND_API_KEY` — Resend API key required to send email
+  - `ADMIN_EMAIL` — recipient address for admin notifications
+
+`SITE_URL` must be an `http://` or `https://` URL. A missing or invalid value prevents status-update emails from being sent and logs a configuration warning instead of generating a link to an unintended domain.
 
 ## Stack
 

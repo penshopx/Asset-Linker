@@ -40,6 +40,37 @@ function safeUrl(url: string | undefined | null): string {
   return "#";
 }
 
+function getSiteUrl(): string {
+  const configuredSiteUrl = process.env["SITE_URL"]?.trim();
+
+  if (!configuredSiteUrl) {
+    const message =
+      "[mailer] Cannot send status update email — SITE_URL is not set. " +
+      "Set SITE_URL to the app base URL for this environment.";
+    console.warn(message);
+    throw new Error(message);
+  }
+
+  let parsedSiteUrl: URL;
+  try {
+    parsedSiteUrl = new URL(configuredSiteUrl);
+  } catch {
+    const message =
+      `[mailer] Cannot send status update email — SITE_URL is not a valid HTTP(S) URL: ${configuredSiteUrl}`;
+    console.warn(message);
+    throw new Error(message);
+  }
+
+  if (parsedSiteUrl.protocol !== "http:" && parsedSiteUrl.protocol !== "https:") {
+    const message =
+      `[mailer] Cannot send status update email — SITE_URL must use http:// or https://: ${configuredSiteUrl}`;
+    console.warn(message);
+    throw new Error(message);
+  }
+
+  return configuredSiteUrl.replace(/\/+$/, "");
+}
+
 /** Send and throw if Resend returns an error result (not just a rejected promise). */
 async function sendOrThrow(
   payload: Parameters<Resend["emails"]["send"]>[0],
@@ -147,7 +178,7 @@ export async function sendStatusUpdate(data: StatusUpdateEmailData): Promise<voi
     return;
   }
 
-  const siteUrl = (process.env["SITE_URL"] ?? "https://dokumenproyek.com").replace(/\/$/, "");
+  const siteUrl = getSiteUrl();
   const statusUrl = `${siteUrl}/cek-pesanan?id=${encodeURIComponent(data.orderId)}`;
   const shortId = `#${data.orderId.slice(0, 8).toUpperCase()}`;
   const statusLabel = STATUS_LABELS[data.newStatus] ?? data.newStatus;
