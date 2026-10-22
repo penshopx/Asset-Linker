@@ -1,0 +1,103 @@
+It looks like your message was cut off at the end. Based on the context, the complete thought is likely: 
+
+*"...leaving the banner untested and potentially risking the link opening in an external browser instead of staying inside the app."*
+
+To ensure the PUB warning banner is fully covered by your integration test suite (task 21) and confirms the link opens **inside** the app, you need to verify two things:
+1. The banner renders correctly for grades B, C, and D (and not for A).
+2. Tapping the banner triggers an **in-app browser** (e.g., `expo-web-browser` or `react-native-inappbrowser-reborn`) rather than `Linking.openURL`, which would kick the user out to the device's default external browser.
+
+Here is how you can add this coverage to your test suite.
+
+### 1. Integration Test (React Native Testing Library)
+This test mocks the in-app browser to ensure the app intercepts the URL correctly without leaving the app environment.
+
+```javascript
+import { render, fireEvent } from '@testing-library/react-native';
+import * as WebBrowser from 'expo-web-browser'; // Replace with your in-app browser library
+import YourComponent from './YourComponent';
+
+// Mock the in-app browser to prevent actual network calls during tests
+jest.mock('expo-web-browser', () => ({
+  openBrowserAsync: jest.fn(),
+}));
+
+describe('PUB Warning Banner Integration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should render the warning banner and open the URL in-app when grade is B', async () => {
+    const { getByTestId } = render(<YourComponent grade="B" />);
+    
+    // 1. Confirm the banner is rendered
+    const banner = getByTestId('warning-banner');
+    expect(banner).toBeTruthy();
+
+    // 2. Simulate the user tapping the banner
+    fireEvent.press(banner);
+
+    // 3. Verify it calls the in-app browser with the correct URL
+    expect(WebBrowser.openBrowserAsync).toHaveBeenCalledWith('https://dp.dokumenproyek.com');
+  });
+
+  it('should render the warning banner when grade is C', () => {
+    const { getByTestId } = render(<YourComponent grade="C" />);
+    expect(getByTestId('warning-banner')).toBeTruthy();
+  });
+
+  it('should render the warning banner when grade is D', () => {
+    const { getByTestId } = render(<YourComponent grade="D" />);
+    expect(getByTestId('warning-banner')).toBeTruthy();
+  });
+
+  it('should NOT render the warning banner when grade is A', () => {
+    const { queryByTestId } = render(<YourComponent grade="A" />);
+    expect(queryByTestId('warning-banner')).toBeNull();
+  });
+});
+```
+
+### 2. E2E Test (Detox)
+If your "integration test suite" refers to end-to-end testing with Detox, you can verify the in-app web view actually appears on the screen after the tap.
+
+```javascript
+describe('PUB Warning Banner E2E', () => {
+  beforeEach(async () => {
+    await device.reloadReactNative();
+    // Add navigation steps here to reach the screen with grade B, C, or D
+  });
+
+  it('should open the PUB warning banner link inside the app', async () => {
+    // 1. Ensure the banner is visible
+    await expect(element(by.id('warning-banner'))).toBeVisible();
+
+    // 2. Tap the banner
+    await element(by.id('warning-banner')).tap();
+
+    // 3. Verify that an in-app webview/browser component is now visible
+    // (Replace 'in-app-webview' with the actual testID of your web browser component)
+    await expect(element(by.id('in-app-webview'))).toBeVisible();
+    
+    // Optional: Verify the URL loaded inside the webview if your setup supports it
+  });
+});
+```
+
+### ⚠️ Important Implementation Check
+If your current component code uses React Native's `Linking.openURL('https://dp.dokumenproyek.com')`, **it will open the external browser**, violating the requirement to open "inside the app". 
+
+Ensure your component's `onPress` handler is updated to use an in-app browser module:
+
+```javascript
+// ❌ Avoid this (opens external browser)
+import { Linking } from 'react-native';
+const handlePress = () => Linking.openURL('https://dp.dokumenproyek.com');
+
+// ✅ Use this (opens inside the app)
+import * as WebBrowser from 'expo-web-browser'; // or react-native-inappbrowser-reborn
+const handlePress = async () => {
+  await WebBrowser.openBrowserAsync('https://dp.dokumenproyek.com');
+};
+```
+
+If you meant a different testing framework or need help adapting this to your specific codebase, feel free to share the rest of the sentence or your component code!
