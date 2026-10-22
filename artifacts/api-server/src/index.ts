@@ -17,14 +17,16 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-applyMigrations().then(() => {
-  app.listen(port, (err) => {
-    if (err) {
-      logger.error({ err }, "Error listening on port");
-      process.exit(1);
-    }
+app.listen(port, (err) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  }
 
-    logger.info({ port }, "Server listening");
-    startBuyerEmailRetryJob();
+  logger.info({ port }, "Server listening");
+  // Keep serving health checks and requests while migrations recover.
+  void applyMigrations().catch((err: unknown) => {
+    logger.error({ err }, "[migrate] Unexpected migration runner failure (non-fatal)");
   });
+  startBuyerEmailRetryJob();
 });

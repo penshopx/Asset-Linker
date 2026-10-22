@@ -8,6 +8,7 @@
  */
 
 import { supabase } from "./supabase";
+import { logger } from "./logger";
 
 /**
  * SQL that must be applied to the database exactly once.
@@ -192,23 +193,101 @@ DO $$ BEGIN
 END $$;
 `;
 
-export async function applyMigrations(): Promise<void> {
-  // Try the helper RPC that the SQL editor script creates.
-  const { error } = await supabase.rpc("run_migration", { sql: MIGRATION_SQL });
+export const MIGRATION_MAX_ATTEMPTS = 6;
+export const MIGRATION_INITIAL_DELAY_MS = 2_000;
+export const MIGRATION_MAX_DELAY_MS = 30_000;
+export const MIGRATION_TIMEOUT_MS = 15_000;
 
-  if (error) {
-    if ((error as any).code === "PGRST202" || error.message?.includes("run_migration")) {
-      // Function doesn't exist yet — print the SQL so the operator can run it manually.
-      console.warn(
-        "[migrate] ⚠️  Could not apply migrations automatically.\n" +
-          "Run the following SQL in the Supabase SQL editor:\n" +
-          MIGRATION_SQL.trim()
-      );
-    } else {
-      // Unexpected error — still non-fatal, but log it clearly.
-      console.error("[migrate] Migration error (non-fatal):", error.message);
+function errorInfo(error: unknown): { code: string; message: string } {
+  if (typeof error !== "object" || error === null) {
+    return { code: "", message: String(error) };
+  }
+  const value = error as { code?: unknown; message?: unknown };
+  return {
+    code: typeof value.code === "string" ? value.code : "",
+    message: typeof value.message === "string" ? value.message : "",
+  };
+}
+
+function isTransient(error: unknown, status: number): boolean {
+  const { code } = errorInfo(error);
+  // SQL/configuration errors take precedence over HTTP status or error text.
+  if (/^[0-9]{2}[0-9A-Z]{3}$/.test(code)) {
+    return code.startsWith("08") || ["57P01", "57P02", "57P03"].includes(code);
+  }
+  if (code.startsWith("PGRST")) {
+    return ["PGRST000", "PGRST001", "PGRST002", "PGRST003"].includes(code);
+  }
+  if ([408, 429, 502, 503, 504].includes(status)) return true;
+  // Supabase often returns a flattened fetch error rather than throwing it.
+  // Inspect causes too for Node's fetch/DNS errors.
+  const seen = new Set<unknown>();
+  for (let current = error; current && !seen.has(current);) {
+    seen.add(current);
+    const info = errorInfo(current);
+    const details = typeof current === "object"
+      ? (current as { details?: unknown }).details : "";
+    const name = typeof current === "object"
+      ? (current as { name?: unknown }).name : "";
+    if (/\b(EAI_AGAIN|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET|AbortError|TimeoutError)\b|fetch failed|network request failed/i.test(
+      `${info.code} ${info.message} ${typeof name === "string" ? name : ""} ${typeof details === "string" ? details : ""}`,
+    )) return true;
+    current = typeof current === "object"
+      ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
+}
+
+/** Non-fatal, bounded recovery; never delays the HTTP listener. */
+export async function applyMigrations(): Promise<void> {
+  for (let attempt = 1; attempt <= MIGRATION_MAX_ATTEMPTS; attempt++) {
+    let error: unknown;
+    let status = 0;
+    try {
+      const response = await supabase
+        .rpc("run_migration", { sql: MIGRATION_SQL })
+        .abortSignal(AbortSignal.timeout(MIGRATION_TIMEOUT_MS));
+      error = response.error;
+      status = response.status;
+    } catch (caught) {
+      error = caught;
     }
-  } else {
-    console.log("[migrate] ✅ Migrations applied successfully.");
+
+    if (!error) {
+      logger.info({ attempt }, "[migrate] Migrations applied successfully");
+      return;
+    }
+
+    const info = errorInfo(error);
+    if (info.code === "PGRST202") {
+      logger.warn(
+        { attempt, code: info.code, sql: MIGRATION_SQL.trim() },
+        "[migrate] Migration helper missing; run this SQL in the Supabase SQL editor (not retried)",
+      );
+      return;
+    }
+    if (!isTransient(error, status)) {
+      logger.error(
+        { attempt, status, ...info },
+        "[migrate] Permanent SQL/configuration error; migration not retried (non-fatal)",
+      );
+      return;
+    }
+    if (attempt === MIGRATION_MAX_ATTEMPTS) {
+      logger.error(
+        { attempt, status, ...info },
+        "[migrate] Temporary connection failure; retry limit reached, migrations remain unapplied (non-fatal)",
+      );
+      return;
+    }
+    const retryInMs = Math.min(
+      MIGRATION_INITIAL_DELAY_MS * 2 ** (attempt - 1),
+      MIGRATION_MAX_DELAY_MS,
+    );
+    logger.warn(
+      { attempt, status, ...info, retryInMs },
+      "[migrate] Temporary connection failure; retry scheduled",
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, retryInMs));
   }
 }
