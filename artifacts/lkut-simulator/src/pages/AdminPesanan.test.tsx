@@ -201,12 +201,17 @@ describe('admin buyer email warning integration', () => {
     await click('Coba kirim ulang');
 
     expectFailureCount(0);
-    expect(visibleText()).not.toContain('PT failed');
     expect(visibleText()).not.toContain(ORIGINAL_ERROR);
-    expect(visibleText()).toContain('Belum ada pesanan');
+    for (const current of serverOrders) {
+      expect(visibleText()).toContain(current.nama_perusahaan);
+    }
+    expect(visibleText()).not.toContain('Belum ada pesanan');
+    expect(fetchMock).toHaveBeenCalledTimes(2); // All rows return without reloading.
     await click('Refresh');
     expectFailureCount(0);
-    expect(visibleText()).not.toContain('PT failed');
+    for (const current of serverOrders) {
+      expect(visibleText()).toContain(current.nama_perusahaan);
+    }
 
     await act(async () => renderer!.unmount());
     renderer = undefined;
@@ -216,6 +221,28 @@ describe('admin buyer email warning integration', () => {
     expect(visibleText()).not.toContain(ORIGINAL_ERROR);
     expect(renderer!.root.findAllByType('button').filter(node => text(node) === 'Coba kirim ulang')).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('leaves the email failure filter after Refresh resolves the last failure, preserving the status filter', async () => {
+    serverOrders.push(order('in-progress', { status: 'diproses', buyer_email_sent: true }));
+    await mount();
+    await click('5Baru');
+    await click('Tampilkan yang gagal');
+    expect(visibleText()).toContain('PT failed');
+    expect(visibleText()).not.toContain('PT pending');
+
+    serverOrders = serverOrders.map(current => current.id === 'failed'
+      ? { ...current, buyer_email_sent: true, buyer_email_error: null }
+      : current);
+    await click('Refresh');
+
+    expectFailureCount(0);
+    for (const current of serverOrders.filter(current => current.status === 'baru')) {
+      expect(visibleText()).toContain(current.nama_perusahaan);
+    }
+    expect(visibleText()).not.toContain('PT in-progress');
+    expect(visibleText()).not.toContain('Belum ada pesanan');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

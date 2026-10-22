@@ -468,6 +468,10 @@ function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminN
   const failedBuyerEmails = orders.filter(
     order => order.buyer_email_sent === false && Boolean(order.buyer_email_error)
   );
+  useEffect(() => {
+    if (failedBuyerEmails.length === 0) setShowEmailFailures(false);
+  }, [failedBuyerEmails.length]);
+
   const filteredByStatus = filter === 'semua' ? orders : orders.filter(o => o.status === filter);
   const filtered = showEmailFailures
     ? filteredByStatus.filter(order => order.buyer_email_sent === false && Boolean(order.buyer_email_error))
