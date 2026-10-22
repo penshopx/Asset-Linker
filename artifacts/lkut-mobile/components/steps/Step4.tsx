@@ -145,9 +145,22 @@ export function Step4({ onReset }: Step4Props) {
   const lowestKeys = getLowestIndicators(indicatorScores, 3);
   const salesAlerts = getSalesAlerts(data, indicatorScores);
 
-  const openURL = (url: string) => {
-    Linking.openURL(url).catch(() => {});
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const openURL = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      const title = 'Tautan tidak dapat dibuka';
+      const message = 'Silakan coba lagi atau buka tautan melalui browser Anda.';
+      if (Platform.OS === 'web') {
+        window.alert(`${title}\n${message}`);
+      } else {
+        Alert.alert(title, message);
+      }
+      // Haptics are optional; their availability must not affect link feedback.
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      return;
+    }
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   };
 
   const openPUB = async () => {

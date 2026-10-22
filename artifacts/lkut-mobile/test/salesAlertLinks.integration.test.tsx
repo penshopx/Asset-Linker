@@ -18,6 +18,8 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { create, act } from 'react-test-renderer';
+import { Alert, Platform } from 'react-native';
+import * as Haptics from 'expo-haptics';
 
 // ─── Hoist the Linking mock so it is available inside vi.mock factories ───────
 const mockOpenURL = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -52,8 +54,10 @@ vi.mock('react-native', () => ({
 }));
 
 vi.mock('expo-haptics', () => ({
-  impactAsync: vi.fn(),
+  impactAsync: vi.fn().mockResolvedValue(undefined),
+  notificationAsync: vi.fn().mockResolvedValue(undefined),
   ImpactFeedbackStyle: { Light: 'Light', Medium: 'Medium', Heavy: 'Heavy' },
+  NotificationFeedbackType: { Error: 'Error', Success: 'Success', Warning: 'Warning' },
 }));
 
 vi.mock('@expo/vector-icons', () => ({
@@ -169,9 +173,10 @@ function pressByTestID(root: ReturnType<typeof create>['root'], testID: string) 
 
 describe('Sales alert product links — integration', () => {
   beforeEach(() => {
-    mockOpenURL.mockClear();
+    vi.clearAllMocks();
+    mockOpenURL.mockReset().mockResolvedValue(undefined);
     mockOpenBrowser.mockReset().mockResolvedValue({ type: 'dismiss' });
-    mockAlert.mockClear();
+    Platform.OS = 'ios';
     // Reset to safe defaults before each test so mocks don't bleed across.
     currentFormData = { ...mockFormData };
   });
@@ -354,6 +359,70 @@ describe('Sales alert product links — integration', () => {
   // ── Linking.openURL is the exact integration seam ─────────────────────────
 
   describe('Linking.openURL integration seam', () => {
+    it('uses medium-impact feedback without an alert when a product link opens', async () => {
+      currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
+      const root = renderStep4();
+
+      await act(async () => {
+        await root.findByProps({ testID: 'alert-product-skk-0' }).props.onPress();
+      });
+
+      expect(Haptics.impactAsync).toHaveBeenCalledExactlyOnceWith(Haptics.ImpactFeedbackStyle.Medium);
+      expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+      expect(Alert.alert).not.toHaveBeenCalled();
+    });
+
+    it('shows an alert and error haptic on rejection, then allows a successful retry', async () => {
+      mockOpenURL.mockRejectedValueOnce(new Error('No browser available'));
+      currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
+      const root = renderStep4();
+      const button = root.findByProps({ testID: 'alert-product-skk-0' });
+
+      await act(async () => {
+        await button.props.onPress();
+      });
+
+      expect(mockOpenURL).toHaveBeenCalledExactlyOnceWith(`${BASE}/paket-tuntas-pkb-skk-jenjang-8`);
+      expect(Alert.alert).toHaveBeenCalledExactlyOnceWith(
+        'Tautan tidak dapat dibuka',
+        'Silakan coba lagi atau buka tautan melalui browser Anda.',
+      );
+      expect(Haptics.notificationAsync).toHaveBeenCalledExactlyOnceWith(Haptics.NotificationFeedbackType.Error);
+      expect(Haptics.impactAsync).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await button.props.onPress();
+      });
+
+      expect(mockOpenURL).toHaveBeenCalledTimes(2);
+      expect(Alert.alert).toHaveBeenCalledTimes(1);
+      expect(Haptics.impactAsync).toHaveBeenCalledExactlyOnceWith(Haptics.ImpactFeedbackStyle.Medium);
+    });
+
+    it('shows a browser alert when a product link fails on web', async () => {
+      Platform.OS = 'web';
+      const alert = vi.fn();
+      vi.stubGlobal('window', { alert });
+      mockOpenURL.mockRejectedValueOnce(new Error('Link blocked'));
+      currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
+      const root = renderStep4();
+
+      try {
+        await act(async () => {
+          await root.findByProps({ testID: 'alert-product-skk-0' }).props.onPress();
+        });
+
+        expect(alert).toHaveBeenCalledExactlyOnceWith(
+          'Tautan tidak dapat dibuka\nSilakan coba lagi atau buka tautan melalui browser Anda.',
+        );
+        expect(Alert.alert).not.toHaveBeenCalled();
+        expect(Haptics.notificationAsync).toHaveBeenCalledExactlyOnceWith(Haptics.NotificationFeedbackType.Error);
+        expect(Haptics.impactAsync).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('openURL is NOT called before any button is pressed', () => {
       currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
       renderStep4();
