@@ -507,7 +507,7 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a replay before the 10-minute TTL and creates a fresh order after it expires', async () => {
+  it.each([10, 11])('returns a duplicate before the TTL and creates a fresh order at %i minutes', async (expiryMinutes) => {
     const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
     const START_TIME = Date.parse('2026-08-30T08:00:00.000Z');
     const REUSED_KEY = 'test-key-expiry-boundary-001';
@@ -518,7 +518,8 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
     // Keep the RPC mock close to the DB function's behavior so this test
     // exercises the complete request flow while controlling the clock:
     // non-expired keys return the original order, while expired keys are
-    // replaced as part of creating a new order.
+    // replaced as part of creating a new order. The DB uses strict >, so
+    // a key exactly 10 minutes old is expired, not a duplicate.
     mockRpc.mockImplementation(
       async (
         _functionName: string,
@@ -561,7 +562,7 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
       expect(withinTtl.body.order_id).toBe(FIRST_ORDER_ID);
       expect(withinTtl.body.duplicate).toBe(true);
 
-      dateNow.mockReturnValue(START_TIME + 11 * 60 * 1000);
+      dateNow.mockReturnValue(START_TIME + expiryMinutes * 60 * 1000);
       const afterTtl = await submitWithReusedKey();
       expect(afterTtl.status).toBe(201);
       expect(afterTtl.body.order_id).toBe(FRESH_ORDER_ID);

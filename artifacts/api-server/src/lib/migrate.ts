@@ -104,6 +104,7 @@ BEGIN
     WHERE  ik.key = p_idempotency_key;
 
     IF FOUND THEN
+      -- Strict >: a key exactly 10 minutes old is expired and may be reused.
       IF v_existing.created_at > NOW() - v_ttl THEN
         -- Non-expired duplicate: return the existing order immediately.
         RETURN QUERY SELECT v_existing.order_id, TRUE;
