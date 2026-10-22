@@ -9,10 +9,11 @@
  * A broken import path, wrong prop name, or incorrect openURL wiring would be
  * invisible to pure unit tests but caught here.
  *
- * Covers the two highest-risk paths called out in the task spec:
+ * Covers:
  *   • SKK primary link (alert.id = 'skk', pIdx = 0)
  *   • BUJKA sewa-peralatan link (alert.id = 'alat', href includes 'sewa-peralatan-sbu-bujka')
  *   • PUB warning banner: opens the in-app browser for B/C/D, absent for A/AA/AAA
+ *   • Prioritas Perbaikan: HR opens Gaia, GCG/operations open DP Store
  */
 
 import React from 'react';
@@ -260,6 +261,31 @@ describe('Sales alert product links — integration', () => {
       expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
       expect(mockAlert).not.toHaveBeenCalled();
       expect(mockOpenURL).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Prioritas Perbaikan action links', () => {
+    it.each([
+      { key: 'hrEmpowerment', url: 'https://gaia.dokumenproyek.com' },
+      { key: 'gcgYears', url: 'https://dp.dokumenproyek.com' },
+      { key: 'moSupplyChain', url: 'https://dp.dokumenproyek.com' },
+    ] as const)('pressing action-btn-$key opens $url exactly once', async ({ key, url }) => {
+      // Make the target the lowest-scoring indicator using the real calculator,
+      // so Step4 must render its recommendation rather than a mocked action.
+      currentFormData = { ...mockFormData, [key]: 0 };
+      const root = renderStep4();
+      const actionCenter = root.findByProps({ testID: 'action-center' });
+      const button = actionCenter.findByProps({ testID: `action-btn-${key}` });
+
+      expect(mockOpenURL).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await button.props.onPress();
+      });
+
+      expect(mockOpenURL).toHaveBeenCalledTimes(1);
+      expect(mockOpenURL).toHaveBeenCalledWith(url);
+      expect(mockOpenBrowser).not.toHaveBeenCalled();
     });
   });
 
