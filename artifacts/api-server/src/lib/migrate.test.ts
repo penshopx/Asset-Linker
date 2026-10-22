@@ -10,6 +10,7 @@ vi.mock("./logger", () => ({ logger: log }));
 
 import {
   applyMigrations,
+  getMigrationStatus,
   MIGRATION_MAX_ATTEMPTS,
   MIGRATION_TIMEOUT_MS,
 } from "./migrate";
@@ -28,6 +29,7 @@ afterEach(() => {
 describe("startup migration recovery", () => {
   it("applies the idempotent SQL immediately when connected", async () => {
     await applyMigrations();
+    expect(getMigrationStatus()).toBe("succeeded");
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith("run_migration", {
       sql: expect.stringContaining("ADD COLUMN IF NOT EXISTS"),
@@ -47,9 +49,11 @@ describe("startup migration recovery", () => {
         cause: { code: "ECONNRESET" },
       }));
     const migration = applyMigrations();
+    expect(getMigrationStatus()).toBe("pending");
     await vi.advanceTimersByTimeAsync(0);
     expect(rpc).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_999);
+    expect(getMigrationStatus()).toBe("pending");
     expect(rpc).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(rpc).toHaveBeenCalledTimes(2);
@@ -57,6 +61,7 @@ describe("startup migration recovery", () => {
     expect(rpc).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1);
     await migration;
+    expect(getMigrationStatus()).toBe("succeeded");
     expect(rpc).toHaveBeenCalledTimes(3);
     expect(log.info).toHaveBeenCalledWith({ attempt: 3 }, expect.any(String));
   });
@@ -73,6 +78,7 @@ describe("startup migration recovery", () => {
     const migration = applyMigrations();
     await vi.runAllTimersAsync();
     await migration;
+    expect(getMigrationStatus()).toBe("failed");
     expect(rpc).toHaveBeenCalledTimes(MIGRATION_MAX_ATTEMPTS);
     expect(log.warn.mock.calls.map(([fields]) => fields.retryInMs))
       .toEqual([2_000, 4_000, 8_000, 16_000, 30_000]);
@@ -91,6 +97,7 @@ describe("startup migration recovery", () => {
         status: 500,
       });
       await applyMigrations();
+      expect(getMigrationStatus()).toBe("failed");
       expect(rpc).toHaveBeenCalledTimes(1);
       expect(log.error).toHaveBeenCalledWith(
         expect.objectContaining({ code }),
@@ -106,6 +113,7 @@ describe("startup migration recovery", () => {
       status: 404,
     });
     await applyMigrations();
+    expect(getMigrationStatus()).toBe("failed");
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ sql: expect.stringContaining("ALTER TABLE orders") }),
@@ -137,5 +145,11 @@ describe("startup migration recovery", () => {
     expect(timeout).toHaveBeenCalledWith(MIGRATION_TIMEOUT_MS);
     expect(rpc).toHaveBeenCalledTimes(2);
     expect(abortSignal.mock.calls[1]![0]).not.toBe(signal);
+  });
+
+  it("marks unexpected runner failures as failed before propagating them", async () => {
+    log.info.mockImplementationOnce(() => { throw new Error("unexpected failure"); });
+    await expect(applyMigrations()).rejects.toThrow("unexpected failure");
+    expect(getMigrationStatus()).toBe("failed");
   });
 });

@@ -290,13 +290,16 @@ export const getEmailReadinessUrl = () => {
 }
 
 /**
- * Email-only readiness, not database readiness. Disabled email is optional and
- * returns 200. Invalid SITE_URL or a failed last send returns 503.
+ * Returns 503 until startup migrations succeed, including while retrying or
+ * after any terminal failure. Database status reports only the startup migration
+ * outcome, not a live connectivity probe. No SQL or error details are exposed.
+ * Email is optional when disabled. Invalid SITE_URL or a failed last send
+ * also returns 503 even after migrations succeed.
  * Provider state reflects this process only: unchecked means no send attempted,
  * available means the last send succeeded, unavailable means the last send
  * failed (including provider rejection), not necessarily a provider-wide outage.
  * No active probe or test email is sent. /healthz remains liveness-only.
- * @summary Email configuration and last-send readiness
+ * @summary Startup migration and email readiness
  */
 export const emailReadiness = async ( options?: Parameters<typeof customFetch>[1]): Promise<EmailReadinessStatus> => {
 
@@ -343,7 +346,7 @@ export type EmailReadinessQueryError = ErrorType<EmailReadinessStatus>
 
 
 /**
- * @summary Email configuration and last-send readiness
+ * @summary Startup migration and email readiness
  */
 
 export function useEmailReadiness<TData = Awaited<ReturnType<typeof emailReadiness>>, TError = ErrorType<EmailReadinessStatus>>(

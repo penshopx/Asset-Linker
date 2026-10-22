@@ -218,6 +218,14 @@ export const MIGRATION_INITIAL_DELAY_MS = 2_000;
 export const MIGRATION_MAX_DELAY_MS = 30_000;
 export const MIGRATION_TIMEOUT_MS = 15_000;
 
+type MigrationStatus = "pending" | "succeeded" | "failed";
+let migrationStatus: MigrationStatus = "pending";
+
+/** Startup migration outcome only; no database query or sensitive error details. */
+export function getMigrationStatus(): MigrationStatus {
+  return migrationStatus;
+}
+
 function errorInfo(error: unknown): { code: string; message: string } {
   if (typeof error !== "object" || error === null) {
     return { code: "", message: String(error) };
@@ -260,6 +268,16 @@ function isTransient(error: unknown, status: number): boolean {
 
 /** Non-fatal, bounded recovery; never delays the HTTP listener. */
 export async function applyMigrations(): Promise<void> {
+  migrationStatus = "pending";
+  try {
+    migrationStatus = await runMigrations() ? "succeeded" : "failed";
+  } catch (error) {
+    migrationStatus = "failed";
+    throw error;
+  }
+}
+
+async function runMigrations(): Promise<boolean> {
   for (let attempt = 1; attempt <= MIGRATION_MAX_ATTEMPTS; attempt++) {
     let error: unknown;
     let status = 0;
@@ -275,7 +293,7 @@ export async function applyMigrations(): Promise<void> {
 
     if (!error) {
       logger.info({ attempt }, "[migrate] Migrations applied successfully");
-      return;
+      return true;
     }
 
     const info = errorInfo(error);
@@ -284,21 +302,21 @@ export async function applyMigrations(): Promise<void> {
         { attempt, code: info.code, sql: (MIGRATION_SQL + PROOF_CLEANUP_SQL).trim() },
         "[migrate] Migration helper missing; run this SQL in the Supabase SQL editor (not retried)",
       );
-      return;
+      return false;
     }
     if (!isTransient(error, status)) {
       logger.error(
         { attempt, status, ...info },
         "[migrate] Permanent SQL/configuration error; migration not retried (non-fatal)",
       );
-      return;
+      return false;
     }
     if (attempt === MIGRATION_MAX_ATTEMPTS) {
       logger.error(
         { attempt, status, ...info },
         "[migrate] Temporary connection failure; retry limit reached, migrations remain unapplied (non-fatal)",
       );
-      return;
+      return false;
     }
     const retryInMs = Math.min(
       MIGRATION_INITIAL_DELAY_MS * 2 ** (attempt - 1),
@@ -310,4 +328,5 @@ export async function applyMigrations(): Promise<void> {
     );
     await new Promise<void>((resolve) => setTimeout(resolve, retryInMs));
   }
+  return false;
 }

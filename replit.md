@@ -24,8 +24,8 @@ Proof uploads return 503 before any bytes are stored if the server-only credenti
 
 `SITE_URL` must be an absolute `http://` or `https://` app base URL with a hostname, without credentials, query parameters, or fragments. When email is enabled, startup validates it and logs the environment and required format, never the supplied URL. Invalid configuration prevents status-update emails without stopping the API.
 
-- `/api/healthz` is liveness only and remains 200 during email failures.
-- `/api/readyz` reports **email-only** readiness (not database readiness): 503 for invalid email links or a failed last send; 200 for valid configuration or intentionally disabled email (no `RESEND_API_KEY`).
+- `/api/healthz` is liveness only and remains 200 during migration or email failures.
+- `/api/readyz` combines startup migration and email readiness. `database.migrations` reports `pending` before completion and throughout retries, `succeeded` after successful migration, or `failed` after a terminal error (including missing helper or exhausted retries). Pending/failed migrations always return 503, even when email is disabled. Once migrations succeed, email readiness still determines whether the response is 200 or 503. This reports startup outcomes, not ongoing database connectivity; neither health endpoint queries the database.
 - `email.links` distinguishes `invalid`, `valid`, and `not_required`. `email.provider` distinguishes `not_configured`, `unchecked`, `available`, and `unavailable`. Provider status reflects the last send in this process, not an active probe: a rejection or network failure sets `unavailable`, a subsequent success clears it. `unchecked` does not guarantee delivery, and `unavailable` does not necessarily indicate a provider-wide outage. Startup and health checks never send test emails.
 
 ## Stack

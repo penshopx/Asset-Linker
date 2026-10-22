@@ -5,6 +5,11 @@ import request from "supertest";
 vi.mock("./logger", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
+vi.mock("./proof-cleanup-client", () => ({
+  getProofCleanupClient: () => ({
+    rpc: () => ({ abortSignal: async () => ({ error: null, status: 200 }) }),
+  }),
+}));
 
 import { logger } from "./logger";
 
@@ -87,6 +92,8 @@ describe("email startup configuration", () => {
 
 it("keeps liveness healthy and distinguishes configuration from last-send failures", async () => {
   const { default: router } = await import("../routes/health");
+  const { applyMigrations } = await import("./migrate");
+  await applyMigrations();
   const { recordEmailSend } = await import("./email-readiness");
   const app = express().use("/api", router);
   await request(app).get("/api/readyz").expect(200);

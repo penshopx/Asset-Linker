@@ -5,10 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { EmailReadinessStatusDatabase } from './emailReadinessStatusDatabase';
 import type { EmailReadinessStatusEmail } from './emailReadinessStatusEmail';
 import type { EmailReadinessStatusStatus } from './emailReadinessStatusStatus';
 
 export interface EmailReadinessStatus {
   status: EmailReadinessStatusStatus;
+  database: EmailReadinessStatusDatabase;
   email: EmailReadinessStatusEmail;
 }

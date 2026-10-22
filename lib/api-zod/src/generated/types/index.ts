@@ -11,6 +11,8 @@ export * from './adminOrderDetail';
 export * from './adminPasscodeParameter';
 export * from './adminStatusHistoryEntry';
 export * from './emailReadinessStatus';
+export * from './emailReadinessStatusDatabase';
+export * from './emailReadinessStatusDatabaseMigrations';
 export * from './emailReadinessStatusEmail';
 export * from './emailReadinessStatusEmailLinks';
 export * from './emailReadinessStatusEmailProvider';

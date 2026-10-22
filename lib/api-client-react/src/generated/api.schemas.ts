@@ -53,6 +53,23 @@ export const EmailReadinessStatusStatus = {
   not_ready: 'not_ready',
 } as const;
 
+/**
+ * Startup migration outcome in this process; not a live database probe.
+ */
+export type EmailReadinessStatusDatabaseMigrations = typeof EmailReadinessStatusDatabaseMigrations[keyof typeof EmailReadinessStatusDatabaseMigrations];
+
+
+export const EmailReadinessStatusDatabaseMigrations = {
+  pending: 'pending',
+  succeeded: 'succeeded',
+  failed: 'failed',
+} as const;
+
+export type EmailReadinessStatusDatabase = {
+  /** Startup migration outcome in this process; not a live database probe. */
+  migrations: EmailReadinessStatusDatabaseMigrations;
+};
+
 export type EmailReadinessStatusEmailLinks = typeof EmailReadinessStatusEmailLinks[keyof typeof EmailReadinessStatusEmailLinks];
 
 
@@ -80,6 +97,7 @@ export type EmailReadinessStatusEmail = {
 
 export interface EmailReadinessStatus {
   status: EmailReadinessStatusStatus;
+  database: EmailReadinessStatusDatabase;
   email: EmailReadinessStatusEmail;
 }
 
