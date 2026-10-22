@@ -12,6 +12,7 @@
  * Covers the two highest-risk paths called out in the task spec:
  *   • SKK primary link (alert.id = 'skk', pIdx = 0)
  *   • BUJKA sewa-peralatan link (alert.id = 'alat', href includes 'sewa-peralatan-sbu-bujka')
+ *   • PUB warning banner: visible and tappable for B/C/D, absent for A/AA/AAA
  */
 
 import React from 'react';
@@ -123,6 +124,7 @@ vi.mock('@/context/FormContext', () => ({
 // ─── Import the real component after all mocks are in place ──────────────────
 // eslint-disable-next-line import/first
 import { Step4 } from '../components/steps/Step4';
+import { THRESHOLDS } from '../lib/lkutCalculator';
 
 // Required by react-test-renderer so act() behaves correctly in a Node env.
 // Must be set before any rendering occurs.
@@ -163,6 +165,53 @@ describe('Sales alert product links — integration', () => {
     mockOpenURL.mockClear();
     // Reset to safe defaults before each test so mocks don't bleed across.
     currentFormData = { ...mockFormData };
+  });
+
+  describe('PUB warning banner', () => {
+    // Use real threshold endpoints to give every management indicator the same
+    // score (60 or 100), without mocking Step4's grade calculation.
+    function formDataAtBandEnd(band: 2 | 4, projectScore: number) {
+      return {
+        ...Object.fromEntries(
+          Object.entries(mockFormData).map(([key, value]) => {
+            const thresholdKey = key.startsWith('mo') ? 'mo' : key;
+            const bands = THRESHOLDS[thresholdKey as keyof typeof THRESHOLDS];
+            return [key, bands ? bands[band][1] : value];
+          }),
+        ) as typeof mockFormData,
+        projectScore,
+      };
+    }
+
+    it.each([
+      { grade: 'B', projectScore: 50 },
+      { grade: 'C', projectScore: 25 },
+      { grade: 'D', projectScore: 0 },
+    ])('shows a working PUB link for grade $grade', ({ grade, projectScore }) => {
+      currentFormData = formDataAtBandEnd(2, projectScore);
+      const root = renderStep4();
+
+      expect(root.findByProps({ testID: 'grade-display' }).props.children).toEqual(['Grade ', grade]);
+      expect(mockOpenURL).not.toHaveBeenCalled();
+
+      pressByTestID(root, 'warning-banner');
+
+      expect(mockOpenURL).toHaveBeenCalledTimes(1);
+      expect(mockOpenURL).toHaveBeenCalledWith('https://dp.dokumenproyek.com');
+    });
+
+    it.each([
+      { grade: 'A', band: 2 as const, projectScore: 75 },
+      { grade: 'AA', band: 2 as const, projectScore: 100 },
+      { grade: 'AAA', band: 4 as const, projectScore: 100 },
+    ])('does not render the PUB banner for grade $grade', ({ grade, band, projectScore }) => {
+      currentFormData = formDataAtBandEnd(band, projectScore);
+      const root = renderStep4();
+
+      expect(root.findByProps({ testID: 'grade-display' }).props.children).toEqual(['Grade ', grade]);
+      expect(root.findAllByProps({ testID: 'warning-banner' })).toHaveLength(0);
+      expect(mockOpenURL).not.toHaveBeenCalled();
+    });
   });
 
   // ── SKK primary link ───────────────────────────────────────────────────────
