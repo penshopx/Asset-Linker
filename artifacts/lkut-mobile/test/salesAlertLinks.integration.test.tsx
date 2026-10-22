@@ -12,7 +12,7 @@
  * Covers the two highest-risk paths called out in the task spec:
  *   • SKK primary link (alert.id = 'skk', pIdx = 0)
  *   • BUJKA sewa-peralatan link (alert.id = 'alat', href includes 'sewa-peralatan-sbu-bujka')
- *   • PUB warning banner: visible and tappable for B/C/D, absent for A/AA/AAA
+ *   • PUB warning banner: opens the in-app browser for B/C/D, absent for A/AA/AAA
  */
 
 import React from 'react';
@@ -21,6 +21,12 @@ import { create, act } from 'react-test-renderer';
 
 // ─── Hoist the Linking mock so it is available inside vi.mock factories ───────
 const mockOpenURL = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockOpenBrowser = vi.hoisted(() => vi.fn().mockResolvedValue({ type: 'dismiss' }));
+const mockAlert = vi.hoisted(() => vi.fn());
+
+vi.mock('expo-web-browser', () => ({
+  openBrowserAsync: mockOpenBrowser,
+}));
 
 // ─── React Native stubs ───────────────────────────────────────────────────────
 // Replaces native modules with plain React elements so react-test-renderer
@@ -40,6 +46,7 @@ vi.mock('react-native', () => ({
   StyleSheet: { create: (s: any) => s, flatten: (s: any) => s },
   Platform: { OS: 'ios', select: (s: any) => s.ios ?? s.default },
   Linking: { openURL: mockOpenURL },
+  Alert: { alert: mockAlert },
   useColorScheme: () => 'light',
   Dimensions: { get: () => ({ width: 375, height: 812 }) },
 }));
@@ -163,6 +170,8 @@ function pressByTestID(root: ReturnType<typeof create>['root'], testID: string) 
 describe('Sales alert product links — integration', () => {
   beforeEach(() => {
     mockOpenURL.mockClear();
+    mockOpenBrowser.mockReset().mockResolvedValue({ type: 'dismiss' });
+    mockAlert.mockClear();
     // Reset to safe defaults before each test so mocks don't bleed across.
     currentFormData = { ...mockFormData };
   });
@@ -196,8 +205,9 @@ describe('Sales alert product links — integration', () => {
 
       pressByTestID(root, 'warning-banner');
 
-      expect(mockOpenURL).toHaveBeenCalledTimes(1);
-      expect(mockOpenURL).toHaveBeenCalledWith('https://dp.dokumenproyek.com');
+      expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
+      expect(mockOpenBrowser).toHaveBeenCalledWith('https://dp.dokumenproyek.com');
+      expect(mockOpenURL).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -210,6 +220,36 @@ describe('Sales alert product links — integration', () => {
 
       expect(root.findByProps({ testID: 'grade-display' }).props.children).toEqual(['Grade ', grade]);
       expect(root.findAllByProps({ testID: 'warning-banner' })).toHaveLength(0);
+      expect(mockOpenURL).not.toHaveBeenCalled();
+      expect(mockOpenBrowser).not.toHaveBeenCalled();
+    });
+
+    it('shows a failure message without falling back to the external browser', async () => {
+      currentFormData = formDataAtBandEnd(2, 50);
+      mockOpenBrowser.mockRejectedValueOnce(new Error('Browser unavailable'));
+      const root = renderStep4();
+
+      await act(async () => {
+        await root.findByProps({ testID: 'warning-banner' }).props.onPress();
+      });
+
+      expect(mockAlert).toHaveBeenCalledWith(
+        'Tautan belum dapat dibuka',
+        'Silakan coba lagi untuk membuka konsultasi PUB.',
+      );
+      expect(mockOpenURL).not.toHaveBeenCalled();
+    });
+
+    it('closing the in-app browser does not show a failure message', async () => {
+      currentFormData = formDataAtBandEnd(2, 50);
+      const root = renderStep4();
+
+      await act(async () => {
+        await root.findByProps({ testID: 'warning-banner' }).props.onPress();
+      });
+
+      expect(mockOpenBrowser).toHaveBeenCalledTimes(1);
+      expect(mockAlert).not.toHaveBeenCalled();
       expect(mockOpenURL).not.toHaveBeenCalled();
     });
   });

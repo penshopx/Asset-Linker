@@ -3,3 +3,4 @@
 - [Status email base URLs](status-email-base-urls.md) — tautan status email wajib berasal dari SITE_URL environment, tanpa fallback ke domain produksi.
 - [Optional status history](optional-status-history.md) — tabel riwayat yang belum termigrasi harus terdegradasi ke array kosong; error database lain tetap eksplisit.
 - [Workspace dependency linking](workspace-dependency-linking.md) — manifest dan lockfile bisa benar sementara symlink paket workspace tertinggal; pulihkan tanpa mengubah versi.
+- [Fokus dan navigasi LKUT](lkut-product-rules.md) — LKUT yang diangkat dalam materi promosi; tautan banner PUB mobile wajib dibuka dalam aplikasi.

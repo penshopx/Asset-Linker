@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Platform, Linking } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Platform, Linking, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '@/hooks/useColors';
 import { useForm } from '@/context/FormContext';
 import {
@@ -149,12 +150,20 @@ export function Step4({ onReset }: Step4Props) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
+  const openPUB = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://dp.dokumenproyek.com');
+    } catch {
+      Alert.alert('Tautan belum dapat dibuka', 'Silakan coba lagi untuk membuka konsultasi PUB.');
+    }
+  };
+
   return (
     <View>
       {/* PUB Warning */}
       {needsPUB && (
         <Pressable
-          onPress={() => openURL('https://dp.dokumenproyek.com')}
+          onPress={openPUB}
           style={[styles.warningBanner, { borderRadius: colors.radius }]}
           testID="warning-banner"
         >
