@@ -17,7 +17,11 @@ _Replace the heading above with the project's name, and this line with one sente
   - `RESEND_API_KEY` — Resend API key required to send email
   - `ADMIN_EMAIL` — recipient address for admin notifications
 
-`SITE_URL` must be an `http://` or `https://` URL. A missing or invalid value prevents status-update emails from being sent and logs a configuration warning instead of generating a link to an unintended domain.
+`SITE_URL` must be an absolute `http://` or `https://` app base URL with a hostname, without credentials, query parameters, or fragments. When email is enabled, startup validates it and logs the environment and required format, never the supplied URL. Invalid configuration prevents status-update emails without stopping the API.
+
+- `/api/healthz` is liveness only and remains 200 during email failures.
+- `/api/readyz` reports **email-only** readiness (not database readiness): 503 for invalid email links or a failed last send; 200 for valid configuration or intentionally disabled email (no `RESEND_API_KEY`).
+- `email.links` distinguishes `invalid`, `valid`, and `not_required`. `email.provider` distinguishes `not_configured`, `unchecked`, `available`, and `unavailable`. Provider status reflects the last send in this process, not an active probe: a rejection or network failure sets `unavailable`, a subsequent success clears it. `unchecked` does not guarantee delivery, and `unavailable` does not necessarily indicate a provider-wide outage. Startup and health checks never send test emails.
 
 ## Stack
 

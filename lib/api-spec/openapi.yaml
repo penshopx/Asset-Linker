@@ -24,8 +24,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /readyz:
+    get:
+      operationId: emailReadiness
+      tags: [health]
+      summary: Email configuration and last-send readiness
+      description: |
+        Email-only readiness, not database readiness. Disabled email is optional and
+        returns 200. Invalid SITE_URL or a failed last send returns 503.
+        Provider state reflects this process only: unchecked means no send attempted,
+        available means the last send succeeded, unavailable means the last send
+        failed (including provider rejection), not necessarily a provider-wide outage.
+        No active probe or test email is sent. /healthz remains liveness-only.
+      responses:
+        "200":
+          description: Email disabled or valid configuration with no known send failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailReadinessStatus"
+        "503":
+          description: Invalid email links or last email send failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailReadinessStatus"
 components:
   schemas:
+    EmailReadinessStatus:
+      type: object
+      required: [status, email]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        email:
+          type: object
+          required: [enabled, links, provider]
+          properties:
+            enabled:
+              type: boolean
+            links:
+              type: string
+              enum: [valid, invalid, not_required]
+            provider:
+              type: string
+              enum: [not_configured, unchecked, available, unavailable]
     HealthStatus:
       type: object
       properties:

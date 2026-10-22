@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { recordEmailSend, validateSiteUrl } from "./email-readiness";
+import { logger } from "./logger";
 
 let resend: Resend | null = null;
 
@@ -41,34 +43,13 @@ function safeUrl(url: string | undefined | null): string {
 }
 
 function getSiteUrl(): string {
-  const configuredSiteUrl = process.env["SITE_URL"]?.trim();
-
-  if (!configuredSiteUrl) {
-    const message =
-      "[mailer] Cannot send status update email — SITE_URL is not set. " +
-      "Set SITE_URL to the app base URL for this environment.";
-    console.warn(message);
-    throw new Error(message);
-  }
-
-  let parsedSiteUrl: URL;
   try {
-    parsedSiteUrl = new URL(configuredSiteUrl);
-  } catch {
-    const message =
-      `[mailer] Cannot send status update email — SITE_URL is not a valid HTTP(S) URL: ${configuredSiteUrl}`;
-    console.warn(message);
-    throw new Error(message);
+    return validateSiteUrl();
+  } catch (err) {
+    logger.warn({ environment: process.env["NODE_ENV"] ?? "unspecified" },
+      "[mailer] Cannot send status update email: invalid SITE_URL; use an absolute HTTP(S) app base URL");
+    throw err;
   }
-
-  if (parsedSiteUrl.protocol !== "http:" && parsedSiteUrl.protocol !== "https:") {
-    const message =
-      `[mailer] Cannot send status update email — SITE_URL must use http:// or https://: ${configuredSiteUrl}`;
-    console.warn(message);
-    throw new Error(message);
-  }
-
-  return configuredSiteUrl.replace(/\/+$/, "");
 }
 
 /** Send and throw if Resend returns an error result (not just a rejected promise). */
@@ -76,12 +57,18 @@ async function sendOrThrow(
   payload: Parameters<Resend["emails"]["send"]>[0],
   options?: Parameters<Resend["emails"]["send"]>[1],
 ): Promise<void> {
-  const { data, error } = await resend!.emails.send(payload, options);
-  if (error) {
-    throw new Error(`Resend error: ${error.message ?? JSON.stringify(error)}`);
-  }
-  if (!data?.id) {
-    throw new Error("Resend returned no email ID and no error — unexpected response");
+  try {
+    const { data, error } = await resend!.emails.send(payload, options);
+    if (error) {
+      throw new Error(`Resend error: ${error.message ?? JSON.stringify(error)}`);
+    }
+    if (!data?.id) {
+      throw new Error("Resend returned no email ID and no error — unexpected response");
+    }
+    recordEmailSend(true);
+  } catch (err) {
+    recordEmailSend(false);
+    throw err;
   }
 }
 

@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { applyMigrations } from "./lib/migrate";
 import { startBuyerEmailRetryJob } from "./lib/buyer-email-retry";
+import { validateEmailStartup } from "./lib/email-readiness";
 
 const rawPort = process.env["PORT"];
 
@@ -16,6 +17,8 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+validateEmailStartup();
 
 app.listen(port, (err) => {
   if (err) {
