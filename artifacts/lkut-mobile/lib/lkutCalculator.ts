@@ -64,6 +64,29 @@ export function getGrade(finalScore: number): string {
   return 'D';
 }
 
+export type LkutCalculationInput = Partial<Record<keyof typeof WEIGHTS | 'projectScore', number>>;
+
+/** The result consumed by Step4; keep this independently testable from the UI. */
+export function calculateResult(data: LkutCalculationInput) {
+  const indicatorScores = {} as Record<keyof typeof WEIGHTS, number>;
+  let financialTotal = 0;
+  let orgTotal = 0;
+  const financialKeys = ['assetGrowth', 'gpm', 'assetTurnover', 'currentRatio', 'der', 'fcf'];
+  for (const key of Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[]) {
+    const bands = key.startsWith('mo') ? THRESHOLDS.mo : THRESHOLDS[key as keyof typeof THRESHOLDS];
+    const score = calculateScore(data[key] || 0, bands);
+    indicatorScores[key] = score;
+    if (financialKeys.includes(key)) financialTotal += score * WEIGHTS[key];
+    else orgTotal += score * WEIGHTS[key];
+  }
+  const financialScore = financialTotal / 30;
+  const orgScore = orgTotal / 70;
+  const managementScore = financialScore * 0.3 + orgScore * 0.7;
+  const projectScore = data.projectScore || 0;
+  const finalScore = projectScore * 0.4 + managementScore * 0.6;
+  return { indicatorScores, financialScore, orgScore, managementScore, projectScore, finalScore, grade: getGrade(finalScore) };
+}
+
 export function getGradeColor(grade: string): string {
   if (grade.includes('A')) return '#10b981';
   if (grade === 'B' || grade === 'C') return '#f59e0b';

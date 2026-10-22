@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { LkutFormData } from '@/types/lkut';
-import { calculateScore, THRESHOLDS, WEIGHTS, getLowestIndicators, getGrade } from '@/lib/lkutCalculator';
+import { calculateResult, getLowestIndicators } from '@/lib/lkutCalculator';
 import { getSalesAlerts, TriggerAlert } from '@/lib/salesEngine';
 import { SniperAttribution, fireWebhook, appendRef } from '@/lib/sniper';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
@@ -135,69 +135,7 @@ export function Step4Hasil({ onReset, attribution }: { onReset: () => void; attr
     setModalOpen(true);
   };
 
-  const indicatorScores = {
-    assetGrowth: calculateScore(data.assetGrowth || 0, THRESHOLDS.assetGrowth),
-    gpm: calculateScore(data.gpm || 0, THRESHOLDS.gpm),
-    assetTurnover: calculateScore(data.assetTurnover || 0, THRESHOLDS.assetTurnover),
-    currentRatio: calculateScore(data.currentRatio || 0, THRESHOLDS.currentRatio),
-    der: calculateScore(data.der || 0, THRESHOLDS.der),
-    fcf: calculateScore(data.fcf || 0, THRESHOLDS.fcf),
-    
-    gcgYears: calculateScore(data.gcgYears || 0, THRESHOLDS.gcgYears),
-    certificates: calculateScore(data.certificates || 0, THRESHOLDS.certificates),
-    awards: calculateScore(data.awards || 0, THRESHOLDS.awards),
-    
-    moSupplyChain: calculateScore(data.moSupplyChain || 0, THRESHOLDS.mo),
-    moMaterialQuality: calculateScore(data.moMaterialQuality || 0, THRESHOLDS.mo),
-    moEquipmentQuality: calculateScore(data.moEquipmentQuality || 0, THRESHOLDS.mo),
-    moK3: calculateScore(data.moK3 || 0, THRESHOLDS.mo),
-    moProcedures: calculateScore(data.moProcedures || 0, THRESHOLDS.mo),
-    moResultQuality: calculateScore(data.moResultQuality || 0, THRESHOLDS.mo),
-    moOM: calculateScore(data.moOM || 0, THRESHOLDS.mo),
-    moSocialProtection: calculateScore(data.moSocialProtection || 0, THRESHOLDS.mo),
-    moEnvironment: calculateScore(data.moEnvironment || 0, THRESHOLDS.mo),
-    
-    equipmentRatio: calculateScore(data.equipmentRatio || 0, THRESHOLDS.equipmentRatio),
-    equipmentNewness: calculateScore(data.equipmentNewness || 0, THRESHOLDS.equipmentNewness),
-    
-    hrProductivity: calculateScore(data.hrProductivity || 0, THRESHOLDS.hrProductivity),
-    hrEmpowerment: calculateScore(data.hrEmpowerment || 0, THRESHOLDS.hrEmpowerment),
-    companyCapacity: calculateScore(data.companyCapacity || 0, THRESHOLDS.companyCapacity),
-  };
-
-  const financialScore = (
-    indicatorScores.assetGrowth * WEIGHTS.assetGrowth +
-    indicatorScores.gpm * WEIGHTS.gpm +
-    indicatorScores.assetTurnover * WEIGHTS.assetTurnover +
-    indicatorScores.currentRatio * WEIGHTS.currentRatio +
-    indicatorScores.der * WEIGHTS.der +
-    indicatorScores.fcf * WEIGHTS.fcf
-  ) / 30;
-
-  const orgScore = (
-    indicatorScores.gcgYears * WEIGHTS.gcgYears +
-    indicatorScores.certificates * WEIGHTS.certificates +
-    indicatorScores.awards * WEIGHTS.awards +
-    indicatorScores.moSupplyChain * WEIGHTS.moSupplyChain +
-    indicatorScores.moMaterialQuality * WEIGHTS.moMaterialQuality +
-    indicatorScores.moEquipmentQuality * WEIGHTS.moEquipmentQuality +
-    indicatorScores.moK3 * WEIGHTS.moK3 +
-    indicatorScores.moProcedures * WEIGHTS.moProcedures +
-    indicatorScores.moResultQuality * WEIGHTS.moResultQuality +
-    indicatorScores.moOM * WEIGHTS.moOM +
-    indicatorScores.moSocialProtection * WEIGHTS.moSocialProtection +
-    indicatorScores.moEnvironment * WEIGHTS.moEnvironment +
-    indicatorScores.equipmentRatio * WEIGHTS.equipmentRatio +
-    indicatorScores.equipmentNewness * WEIGHTS.equipmentNewness +
-    indicatorScores.hrProductivity * WEIGHTS.hrProductivity +
-    indicatorScores.hrEmpowerment * WEIGHTS.hrEmpowerment +
-    indicatorScores.companyCapacity * WEIGHTS.companyCapacity
-  ) / 70;
-
-  const managementScore = (financialScore * 0.3) + (orgScore * 0.7);
-  const projectScore = data.projectScore || 0;
-  const finalScore = (projectScore * 0.4) + (managementScore * 0.6);
-  const grade = getGrade(finalScore);
+  const { indicatorScores, financialScore, orgScore, managementScore, projectScore, finalScore, grade } = calculateResult(data);
 
   const lowestKeys = getLowestIndicators(indicatorScores, 3);
   const salesAlerts = getSalesAlerts(data, indicatorScores);

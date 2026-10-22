@@ -79,3 +79,26 @@ export function getBandInfo(score: number) {
   if (score < 80.5) return { label: 'Tinggi', color: 'bg-blue-100 text-blue-700', border: 'border-blue-200' };
   return { label: 'Sangat Tinggi', color: 'bg-green-100 text-green-700', border: 'border-green-200' };
 }
+
+export type LkutCalculationInput = Partial<Record<keyof typeof WEIGHTS | 'projectScore', number>>;
+
+/** The result consumed by Step4Hasil; keep this independently testable from the UI. */
+export function calculateResult(data: LkutCalculationInput) {
+  const indicatorScores = {} as Record<keyof typeof WEIGHTS, number>;
+  let financialTotal = 0;
+  let orgTotal = 0;
+  const financialKeys = ['assetGrowth', 'gpm', 'assetTurnover', 'currentRatio', 'der', 'fcf'];
+  for (const key of Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[]) {
+    const bands = key.startsWith('mo') ? THRESHOLDS.mo : THRESHOLDS[key as keyof typeof THRESHOLDS];
+    const score = calculateScore(data[key] || 0, bands);
+    indicatorScores[key] = score;
+    if (financialKeys.includes(key)) financialTotal += score * WEIGHTS[key];
+    else orgTotal += score * WEIGHTS[key];
+  }
+  const financialScore = financialTotal / 30;
+  const orgScore = orgTotal / 70;
+  const managementScore = financialScore * 0.3 + orgScore * 0.7;
+  const projectScore = data.projectScore || 0;
+  const finalScore = projectScore * 0.4 + managementScore * 0.6;
+  return { indicatorScores, financialScore, orgScore, managementScore, projectScore, finalScore, grade: getGrade(finalScore) };
+}
