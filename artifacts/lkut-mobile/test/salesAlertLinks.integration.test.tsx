@@ -30,6 +30,10 @@ vi.mock('expo-web-browser', () => ({
   openBrowserAsync: mockOpenBrowser,
 }));
 
+vi.mock('expo-document-picker', () => ({
+  getDocumentAsync: vi.fn(),
+}));
+
 // ─── React Native stubs ───────────────────────────────────────────────────────
 // Replaces native modules with plain React elements so react-test-renderer
 // can render the component tree in Node without a native runtime.

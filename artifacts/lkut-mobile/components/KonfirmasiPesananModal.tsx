@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,7 +12,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as DocumentPicker from 'expo-document-picker';
 import { useColors } from '@/hooks/useColors';
+import {
+  appendPaymentProof,
+  PROOF_MIME_TYPES,
+  releasePaymentProof,
+  validatePaymentProof,
+} from '@/lib/paymentProof';
 
 const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
   ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
@@ -70,8 +78,20 @@ export function KonfirmasiPesananModal({
   const [errorMessage, setErrorMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const idempotencyKeyRef = useRef('');
+  const [proof, setProof] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+  const [proofError, setProofError] = useState('');
+  const [pickingProof, setPickingProof] = useState(false);
+  const pickerSession = useRef(0);
+  const pickerBusy = useRef(false);
+
+  useEffect(() => () => releasePaymentProof(proof, Platform.OS), [proof]);
 
   useEffect(() => {
+    pickerSession.current += 1;
+    pickerBusy.current = false;
+    setPickingProof(false);
+    setProof(null);
+    setProofError('');
     if (!visible) return;
 
     setForm({ ...EMPTY_FORM, produk: defaultProduk });
@@ -81,7 +101,47 @@ export function KonfirmasiPesananModal({
     setErrorMessage('');
     setFieldErrors({});
     idempotencyKeyRef.current = createIdempotencyKey();
+    return () => { pickerSession.current += 1; };
   }, [visible, defaultProduk]);
+
+  const pickProof = async () => {
+    if (pickerBusy.current || state === 'submitting') return;
+    const session = pickerSession.current;
+    pickerBusy.current = true;
+    setPickingProof(true);
+    setProofError('');
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: PROOF_MIME_TYPES,
+        multiple: false,
+        copyToCacheDirectory: true,
+        base64: false,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (session !== pickerSession.current) {
+        releasePaymentProof(asset ?? null, Platform.OS);
+        return;
+      }
+      if (!asset) throw new Error('Berkas tidak dapat dibaca. Silakan pilih ulang.');
+      const error = validatePaymentProof(asset);
+      if (error) {
+        releasePaymentProof(asset, Platform.OS);
+        setProofError(error);
+        return;
+      }
+      setProof(asset);
+    } catch {
+      if (session === pickerSession.current) {
+        setProofError('Tidak dapat membuka berkas. Silakan coba lagi.');
+      }
+    } finally {
+      if (session === pickerSession.current) {
+        pickerBusy.current = false;
+        setPickingProof(false);
+      }
+    }
+  };
 
   const updateField = (field: keyof FormValues, value: string) => {
     setForm((previous) => ({ ...previous, [field]: value }));
@@ -106,7 +166,15 @@ export function KonfirmasiPesananModal({
   };
 
   const submit = async () => {
+    if (state === 'submitting' || pickerBusy.current) return;
     if (!validate()) return;
+    if (proof) {
+      const error = validatePaymentProof(proof);
+      if (error) {
+        setProofError(error);
+        return;
+      }
+    }
 
     setState('submitting');
     setErrorMessage('');
@@ -119,6 +187,7 @@ export function KonfirmasiPesananModal({
       body.append('whatsapp', form.whatsapp.trim());
       body.append('produk', form.produk.trim());
       body.append('catatan', form.catatan.trim());
+      if (proof) appendPaymentProof(body, proof, Platform.OS);
 
       const response = await fetch(`${API_BASE}/konfirmasi-pesanan`, {
         method: 'POST',
@@ -140,6 +209,7 @@ export function KonfirmasiPesananModal({
       setOrderId(submittedOrderId);
       setIsDuplicate(result.duplicate === true);
       setState('success');
+      setProof(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : 'Terjadi kesalahan. Coba lagi.');
@@ -269,9 +339,65 @@ export function KonfirmasiPesananModal({
                   colors={colors}
                 />
 
+                <View style={styles.field}>
+                  <Text style={[styles.label, { color: colors.foreground }]}>
+                    Bukti pembayaran (opsional)
+                  </Text>
+                  <Text style={[styles.proofHint, { color: colors.mutedForeground }]}>
+                    JPG, PNG, atau PDF · Maksimal 10 MB
+                  </Text>
+                  {proof && (
+                    <Text
+                      style={[styles.proofName, { color: colors.foreground }]}
+                      testID="payment-proof-name"
+                    >
+                      {proof.name}
+                    </Text>
+                  )}
+                  <View style={styles.proofActions}>
+                    <Pressable
+                      onPress={pickProof}
+                      disabled={pickingProof || state === 'submitting'}
+                      accessibilityRole="button"
+                      testID="pick-payment-proof"
+                      style={[
+                        styles.proofButton,
+                        { borderColor: colors.border, borderRadius: colors.radius },
+                      ]}
+                    >
+                      <Ionicons name="attach-outline" size={18} color={colors.foreground} />
+                      <Text style={{ color: colors.foreground }}>
+                        {pickingProof ? 'Membuka berkas…' : proof ? 'Ganti berkas' : 'Pilih berkas'}
+                      </Text>
+                    </Pressable>
+                    {proof && (
+                      <Pressable
+                        onPress={() => { setProof(null); setProofError(''); }}
+                        disabled={pickingProof || state === 'submitting'}
+                        accessibilityRole="button"
+                        accessibilityLabel="Hapus bukti pembayaran"
+                        testID="remove-payment-proof"
+                        style={styles.proofButton}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+                        <Text style={{ color: colors.destructive }}>Hapus</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  {!!proofError && (
+                    <Text
+                      style={[styles.fieldError, { color: colors.destructive }]}
+                      accessibilityRole="alert"
+                      testID="payment-proof-error"
+                    >
+                      {proofError}
+                    </Text>
+                  )}
+                </View>
+
                 <Pressable
                   onPress={submit}
-                  disabled={state === 'submitting'}
+                  disabled={state === 'submitting' || pickingProof}
                   style={({ pressed }) => [
                     styles.submitButton,
                     {
@@ -516,6 +642,27 @@ const styles = StyleSheet.create({
   },
   field: {
     marginBottom: 14,
+  },
+  proofHint: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  proofName: {
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  proofActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  proofButton: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   label: {
     fontSize: 13,
