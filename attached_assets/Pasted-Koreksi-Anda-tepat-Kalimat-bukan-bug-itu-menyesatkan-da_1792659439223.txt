@@ -1,0 +1,39 @@
+Koreksi Anda tepat. Kalimat "bukan bug" itu menyesatkan, dan saya menariknya.
+
+## Prinsip yang Benar: Implementasi Harus Cukup Presisi
+
+Jika implementasi dan acuan menerima **input dan aturan yang sama**, maka:
+
+- Acuan: **80,0000000 → AAA**
+- Implementasi: **79,9999999 → AA**
+
+Ini adalah **kegagalan implementasi**, bukan perilaku yang dibenarkan. Toleransi skor hanya berlaku untuk membandingkan **angka terhadap angka** (misal: 79,9999999 ≈ 80,0000000 secara numerik), **bukan** untuk membenarkan perbedaan grade yang dihasilkan dari pemetaan tersebut.
+
+Implikasinya:
+- Implementasi harus cukup presisi sehingga tidak "tergelincir" melewati ambang karena floating-point error, pembulatan prematur, atau kesalahan logika.
+- Jika skor lolos toleransi numerik tetapi grade tidak cocok, pengujian **gagal** dan harus diselidiki — bukan diterima dengan alasan "selisihnya kecil".
+- Toleransi skor dan kesamaan grade adalah **dua assertion terpisah** yang keduanya harus lulus.
+
+Contoh assertion yang benar:
+```javascript
+// Skor boleh berbeda sedikit (toleransi numerik)
+expect(actual.score).toBeCloseTo(expected.score, 6);
+
+// Grade harus sama persis (tanpa toleransi)
+expect(actual.grade).toBe(expected.grade);
+```
+
+Jika assertion pertama lulus tetapi kedua gagal, itu bukan "tolerable drift" — itu bug yang harus diperbaiki di implementasi.
+
+## Pencatatan Penajaman Lainnya
+
+**Kebijakan data belum lengkap:** "Tidak menghasilkan grade dari data parsial" tetap merupakan usulan kebijakan produk, bukan perubahan otomatis yang berlaku pada aplikasi saat ini. Implementasi teknisnya menunggu keputusan eksplisit dari sisi produk.
+
+**Sumber pemulihan data:** Data yang dihapus membutuhkan sumber yang masih menyimpan informasi aslinya — backup atau arsip. Migrasi balik saja tidak cukup jika informasi tersebut sudah hilang dari semua sumber. Perencanaan pemulihan harus memastikan sumber ini ada dan terverifikasi sebelum migrasi destruktif dijalankan.
+
+## Status
+
+- Prinsip toleransi sudah diperbaiki: **toleransi untuk skor, eksak untuk grade, dan implementasi harus cukup presisi untuk tidak melewati ambang**.
+- Dua penajaman lainnya tercatat.
+- Tidak ada perubahan kode, tugas, atau pengujian yang dijalankan.
+- Pekerjaan konsistensi lintas platform tetap pada jalurnya yang sudah digabung.

@@ -1,0 +1,52 @@
+Koreksinya saya terima. Kalimat itu keliru karena menyamakan dua hal yang berbeda: **kebenaran pemetaan satu skor** dan **kebenaran hasil implementasi terhadap acuan untuk input yang sama**. Yang pertama bisa benar sementara yang kedua tetap gagal.
+
+## 1. Pemetaan Benar ≠ Hasil Implementasi Diterima
+
+Contoh yang Anda berikan mempertegas pembedaannya:
+
+| Aspek | Nilai |
+|---|---|
+| Input & aturan | Sama, versi aturan yang disepakati |
+| Hasil acuan | 80 → **AAA** |
+| Hasil implementasi | 79,9999999 → **AA** |
+| Perbandingan skor | Mungkin lolos toleransi |
+| Perbandingan grade | **Tidak cocok** |
+| Status hasil | **Belum boleh diterima** |
+
+Fakta bahwa AA adalah pemetaan yang benar untuk 79,9999999 tidak membatalkan kegagalan tersebut. Yang diuji bukan "apakah fungsi pemetaan tahu ambangnya", melainkan "apakah pipeline implementasi menghasilkan skor dan grade yang sama dengan acuan untuk input yang sama". Jika selisih kecil itu mendorong hasil melewati ambang, justru di situlah dampaknya paling nyata.
+
+Konsekuensinya untuk assertion:
+
+- **Dua pemeriksaan terpisah, keduanya wajib lolos.** Pemeriksaan skor dengan toleransi numerik bersifat diagnostik; ia tidak bisa "menyelamatkan" hasil ketika pemeriksaan grade gagal.
+- **Grade terhadap acuan bersifat eksak.** Tidak ada toleransi, tidak ada normalisasi, tidak ada pembulatan sebelum pemetaan.
+- **Kegagalan grade tetap dilaporkan sebagai kegagalan**, walaupun skor dinyatakan "cukup dekat".
+
+Dan yang perlu diselidiki bukan langsung diasumsikan bug pembulatan. Akar penyebab bisa berupa urutan operasi, akumulai floating-point pada pembobotan, normalisasi input, versi bobot/ambang yang berbeda, atau acuan itu sendiri yang salah. Arah penyelidikannya mengikuti provenance hasil acuan — bukan dengan memperlonggar toleransi atau menggeser ambang sampai tes hijau.
+
+Sebaliknya, jika acuan untuk input tersebut memang 79,9999999, maka AA adalah hasil yang cocok dan tidak ada kegagalan. Penentunya selalu **pasangan input–aturan–acuan yang sama**, bukan kedekatan numerik antar dua angka.
+
+## 2. Data Belum Lengkap: Usulan Kebijakan, Bukan Perilaku Sekarang
+
+Saya catat batasannya: "tidak menghasilkan grade dari data belum lengkap" adalah **usulan kebijakan produk**, bukan perilaku aplikasi saat ini yang boleh saya perlakukan sebagai sudah berlaku.
+
+Implikasi praktisnya:
+- Perilaku saat ini perlu didokumentasikan apa adanya, termasuk apakah data parsial sekarang tetap menghasilkan grade.
+- Perubahan menjadi "tidak menghasilkan grade" atau "grade berflag parsial" memerlukan keputusan eksplisit produk, termasuk dampak terhadap alur pengguna dan riwayat lama.
+- Tes tidak boleh ditulis seolah-olah kebijakan itu sudah disepakati, lalu kegagalan implementasi otomatis disebut bug. Yang perlu dibedakan jelas: **kontrak yang berlaku** vs **usulan yang masih menunggu keputusan**.
+
+## 3. Pemulihan Membutuhkan Sumber yang Masih Menyimpan Informasi Asli
+
+Penajaman ini penting dan saya perbaiki rumusannya: bukan "backup atau migrasi balik" sebagai alternatif yang setara, melainkan **syarat pada sumber pemulihan** — sumber tersebut harus masih mengandung informasi yang hilang.
+
+- Jika nilai asli sudah dihapus, migrasi balik hanya bisa merekonstruksi apa yang masih turunan dari data yang tersisa; ia tidak bisa menciptakan kembali informasi yang tidak ada.
+- Sumber pemulihan yang valid bisa berupa backup, arsip, atau rekaman lain yang memang menyimpan payload asli — diverifikasi isinya, bukan sekadar diasumsikan ada.
+- Karena itu, sebelum migrasi destruktif, yang perlu dipastikan adalah **ketersediaan dan keterpulihan sumber tersebut**, bukan hanya keberadaan skrip rollback.
+
+## Status
+
+- Dasar tinjauan tetap lampiran pertama, dengan koreksi contoh ambang dan koreksi kalimat "bukan bug" ini.
+- Prinsip yang kini konsisten: toleransi untuk perbandingan skor, grade eksak terhadap acuan, ambang tidak digeser, dan ketidakcocokan grade pada input & aturan yang sama adalah kegagalan yang harus diselidiki.
+- Kebijakan data parsial tercatat sebagai usulan; kebutuhan sumber pemulihan tercatat sebagai prasyarat migrasi destruktif.
+- Penyatuan sumber aturan dan pengujian pembulatan tetap tercatat sebagai lanjutan, di atas pekerjaan konsistensi lintas platform yang sudah digabung.
+
+**Tidak ada perubahan kode, tugas, atau pengujian yang dijalankan dalam tinjauan ini.**
