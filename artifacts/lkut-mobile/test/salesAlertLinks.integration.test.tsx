@@ -18,7 +18,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { create, act } from 'react-test-renderer';
 import { Alert, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -190,6 +190,8 @@ describe('Sales alert product links — integration', () => {
     mockOpenURL.mockReset().mockResolvedValue(undefined);
     mockOpenBrowser.mockReset().mockResolvedValue({ type: 'dismiss' });
     mockSetString.mockReset().mockResolvedValue(true);
+    vi.mocked(Haptics.notificationAsync).mockReset().mockResolvedValue(undefined);
+    vi.mocked(Haptics.impactAsync).mockReset().mockResolvedValue(undefined);
     Platform.OS = 'ios';
     // Reset to safe defaults before each test so mocks don't bleed across.
     currentFormData = { ...mockFormData };
@@ -493,6 +495,102 @@ describe('Sales alert product links — integration', () => {
       pressByTestID(root, 'alert-product-skk-1');
 
       expect(mockOpenURL).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe.each(['ios', 'android', 'web'] as const)('unavailable haptics on %s', (platform) => {
+    let unhandledRejections: unknown[];
+    const recordUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+
+    beforeEach(() => {
+      Platform.OS = platform;
+      currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
+      unhandledRejections = [];
+      process.on('unhandledRejection', recordUnhandledRejection);
+    });
+
+    afterEach(async () => {
+      try {
+        // Awaiting onPress alone cannot detect a detached haptic rejection.
+        // Let Node report any unhandled promises before checking the result.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(unhandledRejections).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', recordUnhandledRejection);
+      }
+    });
+
+    it('does not turn a successful link into a failure when impact feedback rejects', async () => {
+      vi.mocked(Haptics.impactAsync).mockRejectedValue(new Error('Haptics unavailable'));
+      const root = renderStep4();
+      const button = root.findByProps({ testID: 'alert-product-skk-0' });
+
+      for (const attempt of [1, 2]) {
+        await act(async () => {
+          await expect(button.props.onPress()).resolves.toBeUndefined();
+        });
+
+        expect(mockOpenURL).toHaveBeenCalledTimes(attempt);
+        expect(mockOpenURL).toHaveBeenLastCalledWith(`${BASE}/paket-tuntas-pkb-skk-jenjang-8`);
+        expect(Haptics.impactAsync).toHaveBeenCalledTimes(attempt);
+        expect(Haptics.impactAsync).toHaveBeenLastCalledWith(Haptics.ImpactFeedbackStyle.Medium);
+        expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+        expect(mockAlert).not.toHaveBeenCalled();
+        expect(root.findAllByProps({ testID: 'link-failure-dialog' })).toHaveLength(0);
+      }
+    });
+
+    it('keeps link failure feedback and retries working when notification and impact feedback reject', async () => {
+      vi.mocked(Haptics.notificationAsync).mockRejectedValue(new Error('Notification haptics unavailable'));
+      vi.mocked(Haptics.impactAsync).mockRejectedValue(new Error('Impact haptics unavailable'));
+      mockOpenURL
+        .mockRejectedValueOnce(new Error('No browser available'))
+        .mockRejectedValueOnce(new Error('Browser still unavailable'));
+      const root = renderStep4();
+      const button = root.findByProps({ testID: 'alert-product-skk-0' });
+      const url = `${BASE}/paket-tuntas-pkb-skk-jenjang-8`;
+
+      for (const attempt of [1, 2]) {
+        await act(async () => {
+          await expect(button.props.onPress()).resolves.toBeUndefined();
+        });
+
+        expect(mockOpenURL).toHaveBeenCalledTimes(attempt);
+        expect(mockOpenURL).toHaveBeenLastCalledWith(url);
+        expect(Haptics.notificationAsync).toHaveBeenCalledTimes(attempt);
+        expect(Haptics.notificationAsync).toHaveBeenLastCalledWith(Haptics.NotificationFeedbackType.Error);
+        expect(Haptics.impactAsync).not.toHaveBeenCalled();
+        if (platform === 'web') {
+          expect(root.findByProps({ testID: 'link-failure-url' }).props.children).toBe(url);
+          expect(mockAlert).not.toHaveBeenCalled();
+          pressByTestID(root, 'link-failure-close');
+          expect(root.findAllByProps({ testID: 'link-failure-dialog' })).toHaveLength(0);
+        } else {
+          expect(mockAlert).toHaveBeenCalledTimes(attempt);
+          expect(mockAlert).toHaveBeenLastCalledWith(
+            'Tautan tidak dapat dibuka',
+            `Silakan coba lagi atau buka tautan melalui browser Anda.\n\n${url}`,
+            [
+              { text: 'Tutup', style: 'cancel' },
+              { text: 'Salin tautan', onPress: expect.any(Function) },
+            ],
+          );
+        }
+      }
+
+      await act(async () => {
+        await expect(button.props.onPress()).resolves.toBeUndefined();
+      });
+
+      expect(mockOpenURL.mock.calls).toEqual([[url], [url], [url]]);
+      expect(Haptics.notificationAsync).toHaveBeenCalledTimes(2);
+      expect(Haptics.impactAsync).toHaveBeenCalledExactlyOnceWith(Haptics.ImpactFeedbackStyle.Medium);
+      expect(mockAlert).toHaveBeenCalledTimes(platform === 'web' ? 0 : 2);
+      expect(root.findAllByProps({ testID: 'link-failure-dialog' })).toHaveLength(0);
+      expect(mockSetString).not.toHaveBeenCalled();
+      expect(mockOpenBrowser).not.toHaveBeenCalled();
     });
   });
 
