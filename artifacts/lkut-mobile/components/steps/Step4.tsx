@@ -293,6 +293,7 @@ export function Step4({ onReset }: Step4Props) {
 
       <View style={styles.ctaRow}>
         <Pressable
+          testID="reset-btn"
           onPress={() => { onReset(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
           style={({ pressed }) => [
             styles.ctaBtn,

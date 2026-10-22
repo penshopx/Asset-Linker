@@ -14,6 +14,7 @@
  *   • BUJKA sewa-peralatan link (alert.id = 'alat', href includes 'sewa-peralatan-sbu-bujka')
  *   • PUB warning banner: opens the in-app browser for B/C/D, absent for A/AA/AAA
  *   • Prioritas Perbaikan: HR opens Gaia, GCG/operations open DP Store
+ *   • Hitung Ulang: calls onReset once without opening any link
  */
 
 import React from 'react';
@@ -155,10 +156,10 @@ const BASE = 'https://bayar.gustafta.my.id/p';
  * Render Step4 with react-test-renderer and return the root instance.
  * Wraps in act() so effects / state updates flush before we query.
  */
-function renderStep4() {
+function renderStep4(onReset: () => void = vi.fn()) {
   let renderer: ReturnType<typeof create>;
   act(() => {
-    renderer = create(React.createElement(Step4, { onReset: vi.fn() }));
+    renderer = create(React.createElement(Step4, { onReset }));
   });
   return renderer!.root;
 }
@@ -184,6 +185,21 @@ describe('Sales alert product links — integration', () => {
     Platform.OS = 'ios';
     // Reset to safe defaults before each test so mocks don't bleed across.
     currentFormData = { ...mockFormData };
+  });
+
+  describe('Hitung Ulang', () => {
+    it('calls onReset exactly once without opening a link', () => {
+      const onReset = vi.fn();
+      const root = renderStep4(onReset);
+
+      expect(onReset).not.toHaveBeenCalled();
+
+      pressByTestID(root, 'reset-btn');
+
+      expect(onReset).toHaveBeenCalledTimes(1);
+      expect(mockOpenURL).not.toHaveBeenCalled();
+      expect(mockOpenBrowser).not.toHaveBeenCalled();
+    });
   });
 
   describe('PUB warning banner', () => {
