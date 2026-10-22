@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Package, Clock, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { CopyOrderStatusLink } from '@/components/CopyOrderStatusLink';
 import {
   clearOrderSummary,
   clearOrderSummaryAfterSuccessfulLookup,
@@ -268,6 +269,8 @@ export default function CekPesanan() {
                   <StatusTimeline history={order.history} currentStatus={order.status} />
                 </div>
               )}
+
+              <CopyOrderStatusLink key={order.id} orderId={order.id} />
 
               <div className="px-6 pb-5">
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">

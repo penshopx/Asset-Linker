@@ -64,6 +64,18 @@ describe('order summary session storage', () => {
     );
   });
 
+  it.each(['', '/', '/simulator', '/simulator/', '/apps/lkut/'])(
+    'preserves the application base %j and encodes special characters in the order ID',
+    base => {
+      const id = 'order/id 123?x=1&y=#status';
+      const url = new URL(getOrderStatusUrl(base, id), 'https://example.test');
+      expect(url.pathname).toBe(`${base.replace(/\/$/, '')}/cek-pesanan`);
+      expect(url.searchParams.get('id')).toBe(id);
+      expect([...url.searchParams.keys()]).toEqual(['id']);
+      expect(url.hash).toBe('');
+    },
+  );
+
   it('keeps the summary across reloads and unavailable status lookups', () => {
     const storage = createSessionStorage();
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage });
