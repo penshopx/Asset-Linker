@@ -1,0 +1,49 @@
+Keempat koreksi Anda tepat, dan saya terima tanpa pengecualian. Berikut catatan perbaikan pemahaman saya:
+
+## 1. Ilustrasi, Bukan Hasil Pemeriksaan
+
+Empat baris awal respons saya memang menunjukkan kegagalan pemanggilan alat — artinya saya tidak benar-benar membaca `AdminPesanan.tsx`. Contoh kode yang saya tulis setelahnya adalah **ilustrasi berdasarkan deskripsi bug Anda**, bukan hasil pemeriksaan struktur kode aktual. Saya seharusnya menyatakan ini secara eksplisit sejak awal, bukan menyajikannya seolah-olah saya telah melihat implementasinya.
+
+Implikasinya: rekomendasi arsitektural tetap berlaku sebagai arah umum, tetapi detail implementasi (nama state, struktur JSX, hook yang dipakai) harus diverifikasi langsung di kode sebelum diterapkan.
+
+## 2. Array Kosong ≠ Semua Email Berhasil
+
+Koreksi ini penting dan saya lewatkan. `failedBuyerEmails.length === 0` memiliki tiga makna berbeda yang tidak boleh disamakan:
+
+| Keadaan | Arti sebenarnya | Tindakan yang aman |
+|---|---|---|
+| Data berhasil dimuat, array kosong | Tidak ada email gagal pada rentang data ini | Reset filter boleh dipertimbangkan |
+| Pemuatan awal (data belum ada) | Belum diketahui | Jangan reset, jangan tampilkan pesan |
+| Refresh gagal / data belum lengkap | Status tidak diketahui | Jangan reset, jangan tampilkan pesan |
+
+Reset otomatis hanya aman setelah **pengambilan data berhasil** dan **cakupannya memang cukup** untuk memastikan tidak ada email gagal. Tanpa dua syarat ini, reset bisa menyembunyikan filter yang masih relevan.
+
+## 3. URL Filter Bukan Solusi, Hanya Pelengkap
+
+Saya keliru menyebut Solusi 3 sebagai "paling robust". Faktanya:
+
+- URL filter **mempertahankan** filter setelah refresh — ini justru memperparah masalah yang Anda deskripsikan (filter aktif, tombol keluar hilang).
+- URL filter berguna untuk **bookmark dan berbagi**, bukan untuk menjamin kontrol selalu tersedia.
+- Tetap butuh tombol keluar yang selalu muncul saat filter aktif, terlepas dari apakah filter disimpan di state lokal atau URL.
+
+Jadi URL filter adalah **pelengkap** untuk kasus penggunaan tertentu, bukan pengganti Solusi 1.
+
+## 4. Pesan yang Tepat
+
+Pesan "Semua email berhasil dikirim" memang terlalu kuat jika hanya didasarkan pada array kosong. Pesan yang tepat adalah:
+
+> **"Tidak ada pesanan dengan email gagal"** — dan hanya ditampilkan **setelah data berhasil dimuat**.
+
+Pembedaannya:
+- "Semua email berhasil" → klaim tentang proses pengiriman (butuh bukti dari backend/email service)
+- "Tidak ada pesanan dengan email gagal" → pernyataan tentang data yang sedang ditampilkan (bisa diverifikasi dari array yang dimuat)
+
+## Status Akhir
+
+- **Dasar solusi:** Solusi 1 (pisahkan kontrol filter dari banner notifikasi) — tombol keluar selalu tersedia saat filter aktif.
+- **Reset otomatis:** Boleh melengkapi, dengan syarat membedakan hasil kosong valid dari kegagalan pemuatan.
+- **URL filter:** Pelengkap untuk bookmark/share, bukan pengganti kontrol yang selalu tersedia.
+- **Pesan UI:** "Tidak ada pesanan dengan email gagal", hanya setelah data berhasil dimuat.
+- **Pengujian:** Harus mencakup kedua keadaan — hasil kosong valid dan kegagalan pemuatan — agar reset otomatis tidak menyembunyikan filter yang masih relevan.
+
+**Tidak ada perubahan kode, tugas, atau pengujian yang dijalankan dalam tinjauan ini.**
