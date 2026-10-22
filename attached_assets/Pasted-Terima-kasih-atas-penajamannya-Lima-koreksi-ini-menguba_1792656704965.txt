@@ -1,0 +1,49 @@
+Terima kasih atas penajamannya. Lima koreksi ini mengubah beberapa prinsip dari "mutlak" menjadi "tepat sasaran", dan saya catat implikasi praktisnya:
+
+## 1. Idempotensi Semantik, Bukan Byte-Identik
+
+Implikasinya: tes idempotensi harus membandingkan **field kunci** (skor, grade, timestamp perubahan status), bukan string JSON mentah. Urutan properti, whitespace, atau metadata tambahan (misal `migrated_at`) tidak boleh menggagalkan tes. Jika larangan penulisan ulang tetap jadi kebutuhan (misal untuk menghindari write amplification di storage), itu harus jadi tes terpisah dengan maksud yang eksplisit.
+
+## 2. "Belum Lengkap" Bukan Angka
+
+Ini koreksi prinsip yang penting. Mengisi field wajib dengan `0` atau nilai netral lain **adalah keputusan yang mempengaruhi grade** — bukan keputusan kosong. Implikasinya:
+- Jika field wajib tidak bisa diisi dari data lama, record ditandai `incomplete` atau `needs_review`, bukan ditebak angkanya.
+- Pipeline perhitungan harus punya jalur terpisah untuk record `incomplete` — misalnya tidak menghasilkan grade, atau menghasilkan grade dengan flag "berdasarkan data parsial".
+- Default yang "terlihat aman" sebenarnya menyembunyikan informasi dan menggeser tanggung jawab ke pengguna tanpa mereka sadari.
+
+## 3. Provenance Hasil Acuan
+
+Golden reference tanpa provenance hanya snapshot yang kelihatan resmi. Setiap entry hasil acuan harus menyertakan:
+- Asal aturan (dokumen kebijakan, keputusan produk, tanggal disepakati)
+- Bobot yang dipakai dan sumbernya
+- Langkah perhitungan eksplisit (bukan hanya input → output)
+- Nama pihak yang menyetujui
+
+Ini membuat hasil acuan bisa **diaudit dan ditantang**, bukan hanya dipercaya karena ada di file fixture.
+
+## 4. Toleransi Skor, Grade Eksak
+
+Pemisahan ini harus tercermin di struktur assertion:
+- Skor: `expect(actual).toBeCloseTo(expected, precision)` — toleransi numerik yang disepakati.
+- Grade: `expect(actual.grade).toBe(expected.grade)` — persamaan eksak, tanpa toleransi.
+- Toleransi tidak boleh dipakai di pemetaan skor → grade. Jika skor aktual 79.99999 dan acuan 80.00001, keduanya harus menghasilkan grade yang sama **karena aturan pemetaannya**, bukan karena toleransi menggeser ambang.
+
+## 5. Rollback Data Perlu Perencanaan Tersendiri
+
+Rollback kode hanya mengembalikan perilaku, bukan keadaan. Jika migrasi sudah menimpa atau menghapus data, pemulihan memerlukan:
+- Salinan data pra-migrasi (backup yang diverifikasi, bukan asumsi), **atau**
+- Migrasi balik yang sudah diuji dengan fixture tersendiri.
+
+Implikasinya: setiap migrasi yang bersifat destruktif harus punya **rencana pemulihan yang diuji sebelum migrasi dijalankan**, bukan dirancang setelah masalah muncul.
+
+---
+
+## Status Pekerjaan
+
+Saya catat bahwa:
+- Pengujian batas (tiga titik di setiap ambang) dan pengujian seluruh alur perhitungan sudah tepat arah.
+- Pekerjaan konsistensi lintas platform telah digabung — saya tidak akan membuat tes atau kode duplikat.
+- Penyatuan sumber aturan (shared package) dan pengujian pembulatan tercatat sebagai lanjutan.
+- Tidak ada perubahan kode atau tes yang dijalankan dalam tinjauan ini, dan saya tidak akan memulainya.
+
+Lima penajaman ini saya masukkan sebagai prinsip pengiring untuk pekerjaan lanjutan tersebut — khususnya saat shared package diekstrak dan hasil acuan mulai disusun dengan provenance yang jelas.
