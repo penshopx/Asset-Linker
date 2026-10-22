@@ -234,6 +234,24 @@ function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; pas
       });
       const body = await res.json().catch(() => ({}));
 
+      if (res.status === 409) {
+        // Another process may have sent or claimed the email. A conflict is
+        // not a delivery failure: reconcile only from the persisted order.
+        try {
+          const latest = await fetch(`${API_BASE}/admin/orders/${encodeURIComponent(order.id)}`, {
+            headers: { 'x-admin-passcode': passcode },
+          });
+          const updated = await latest.json();
+          if (!latest.ok || updated?.id !== order.id) {
+            throw new Error('Invalid order response');
+          }
+          onUpdated(updated);
+        } catch {
+          setRetryError('Status email terbaru belum dapat dimuat. Klik Refresh untuk memeriksa kembali.');
+        }
+        return;
+      }
+
       if (!res.ok) {
         const message = body.error ?? 'Email gagal dikirim ulang.';
         setRetryError(message);

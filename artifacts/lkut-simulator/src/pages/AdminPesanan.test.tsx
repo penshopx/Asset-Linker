@@ -95,9 +95,13 @@ beforeEach(() => {
       const snapshot = structuredClone(serverOrders);
       return { ok: true, status: 200, json: async () => snapshot };
     }
+    if (url === `${LIST_URL}/failed` && !init?.method) {
+      const snapshot = structuredClone(serverOrders.find(current => current.id === 'failed'));
+      return { ok: true, status: 200, json: async () => ({ ...snapshot, history: [] }) };
+    }
     if (url === `${LIST_URL}/failed/retry-buyer-email` && init?.method === 'POST') {
       const { status, body } = retryResponse;
-      serverOrders = serverOrders.map(current => current.id === 'failed'
+      serverOrders = serverOrders.map(current => current.id === 'failed' && status !== 409
         ? {
             ...current,
             buyer_email_sent: status === 200,
@@ -194,6 +198,111 @@ describe('admin buyer email warning integration', () => {
     expect(visibleText()).not.toContain(ORIGINAL_ERROR);
     expect(visibleText()).not.toContain('PT pending');
   });
+
+  it('reconciles an already-sent conflict and clears the last warning and failure filter', async () => {
+    const conflict = 'Email konfirmasi sudah berhasil terkirim sebelumnya.';
+    retryResponse = { status: 409, body: { error: conflict } };
+    await mount();
+    await click('Tampilkan yang gagal');
+    serverOrders = serverOrders.map(current => current.id === 'failed'
+      ? { ...current, buyer_email_sent: true, buyer_email_error: null }
+      : current);
+
+    await click('Coba kirim ulang');
+
+    expect(fetchMock).toHaveBeenLastCalledWith(`${LIST_URL}/failed`, {
+      headers: { 'x-admin-passcode': PASSCODE },
+    });
+    expectFailureCount(0);
+    expect(visibleText()).not.toContain(ORIGINAL_ERROR);
+    expect(visibleText()).not.toContain(conflict);
+    expect(visibleText()).not.toContain('Email konfirmasi pembeli gagal terkirim');
+    for (const current of serverOrders) {
+      expect(visibleText()).toContain(current.nama_perusahaan);
+    }
+    await click('Refresh');
+    expectFailureCount(0);
+    expect(visibleText()).not.toContain(ORIGINAL_ERROR);
+  });
+
+  it('removes an already-sent conflict from the failure-only list while other failures remain', async () => {
+    serverOrders.push(order('other-failed', { buyer_email_error: 'Another failure' }));
+    retryResponse = { status: 409, body: { error: 'Already sent' } };
+    await mount();
+    await click('Tampilkan yang gagal');
+    serverOrders[0] = { ...serverOrders[0], buyer_email_sent: true, buyer_email_error: null };
+    const retry = renderer!.root.findAllByType('button')
+      .find(node => text(node).trim() === 'Coba kirim ulang')!;
+    await act(async () => { await retry.props.onClick(); });
+
+    expectFailureCount(1);
+    expect(visibleText()).not.toContain('PT failed');
+    expect(visibleText()).not.toContain('PT pending');
+    expect(visibleText()).toContain('PT other-failed');
+    await click('Tampilkan semua pesanan');
+    expect(visibleText()).toContain('PT failed');
+    expect(visibleText()).not.toContain(ORIGINAL_ERROR);
+    expect(visibleText()).not.toContain('Already sent');
+  });
+
+  it.each([ORIGINAL_ERROR, null])(
+    'reconciles an in-progress conflict using the persisted error (%s), not the conflict message',
+    async persistedError => {
+      const conflict = 'Email sedang dicoba ulang oleh proses lain. Muat ulang dan coba lagi.';
+      retryResponse = { status: 409, body: { error: conflict } };
+      await mount();
+      await click('Tampilkan yang gagal');
+      serverOrders[0] = { ...serverOrders[0], buyer_email_error: persistedError };
+
+      await click('Coba kirim ulang');
+
+      expect(fetchMock).toHaveBeenLastCalledWith(`${LIST_URL}/failed`, {
+        headers: { 'x-admin-passcode': PASSCODE },
+      });
+      expectFailureCount(persistedError ? 1 : 0);
+      expect(visibleText()).toContain('PT failed');
+      expect(visibleText()).not.toContain(conflict);
+      if (persistedError) {
+        expect(visibleText()).toContain(persistedError);
+        expect(visibleText()).not.toContain('PT pending');
+        expect(button('Coba kirim ulang').props.disabled).toBe(false);
+      } else {
+        expect(visibleText()).not.toContain(ORIGINAL_ERROR);
+        expect(visibleText()).toContain('PT pending');
+        expect(visibleText()).not.toContain('Email konfirmasi pembeli gagal terkirim');
+      }
+    },
+  );
+
+  it.each(['network', 'server', 'invalid'])(
+    'preserves the last known failure when reconciliation fails (%s) without recording a false delivery error',
+    async failure => {
+      const conflict = 'Email konfirmasi sudah berhasil terkirim sebelumnya.';
+      retryResponse = { status: 409, body: { error: conflict } };
+      const defaultFetch = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => unknown;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === `${LIST_URL}/failed`) {
+          if (failure === 'network') throw new Error('Network unavailable');
+          return {
+            ok: failure !== 'server',
+            status: failure === 'server' ? 500 : 200,
+            json: async () => ({ error: 'Unavailable' }),
+          };
+        }
+        return defaultFetch(url, init);
+      });
+      await mount();
+      await click('Tampilkan yang gagal');
+      await click('Coba kirim ulang');
+
+      expectFailureCount(1);
+      expect(visibleText()).toContain(ORIGINAL_ERROR);
+      expect(visibleText()).not.toContain(conflict);
+      expect(visibleText()).toContain('Status email terbaru belum dapat dimuat. Klik Refresh');
+      expect(visibleText()).not.toContain('PT pending');
+      expect(button('Coba kirim ulang').props.disabled).toBe(false);
+    },
+  );
 
   it('clears the last failure warning immediately and does not resurrect it on refresh or remount', async () => {
     await mount();
