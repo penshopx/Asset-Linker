@@ -8,6 +8,7 @@ type OrderStatus = 'baru' | 'diproses' | 'selesai' | 'dibatalkan';
 interface StatusHistoryEntry {
   status: OrderStatus;
   changed_at: string;
+  changed_by?: string | null;
 }
 
 interface Order {
@@ -46,13 +47,18 @@ function waLink(phone: string) {
 }
 
 // ─── Login Screen ─────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }: { onLogin: (passcode: string) => void }) {
+function LoginScreen({ onLogin }: { onLogin: (passcode: string, adminName: string) => void }) {
   const [input, setInput] = useState('');
+  const [adminName, setAdminName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!adminName.trim() || adminName.trim().length > 80 || /[\u0000-\u001f\u007f]/.test(adminName)) {
+      setError('Nama admin wajib diisi, maksimal 80 karakter tanpa karakter kontrol.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -62,7 +68,7 @@ function LoginScreen({ onLogin }: { onLogin: (passcode: string) => void }) {
       if (res.status === 401) {
         setError('Passcode salah. Coba lagi.');
       } else if (res.ok) {
-        onLogin(input);
+        onLogin(input, adminName.trim());
       } else {
         setError('Terjadi kesalahan server. Coba lagi.');
       }
@@ -82,17 +88,32 @@ function LoginScreen({ onLogin }: { onLogin: (passcode: string) => void }) {
           </div>
           <div className="text-center">
             <h1 className="text-xl font-bold text-white">Admin DokumenProyek</h1>
-            <p className="text-slate-400 text-sm mt-1">Masukkan passcode untuk lanjut</p>
+            <p className="text-slate-400 text-sm mt-1">Masukkan nama dan passcode untuk lanjut</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block text-sm text-slate-300">
+            Nama admin
+            <input
+              type="text"
+              value={adminName}
+              onChange={e => setAdminName(e.target.value)}
+              required
+              maxLength={80}
+              autoComplete="name"
+              autoFocus
+              className="mt-1 w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500"
+            />
+          </label>
+          <p className="text-xs text-slate-400">Nama dicatat pada riwayat perubahan. Identitas diisi sendiri, bukan akun terverifikasi.</p>
           <input
             type="password"
             value={input}
             onChange={e => setInput(e.target.value)}
             placeholder="Passcode admin"
-            autoFocus
+            aria-label="Passcode admin"
+            required
             className="w-full bg-slate-700 border border-slate-600 text-white placeholder-slate-400 rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
           />
           {error && (
@@ -102,7 +123,7 @@ function LoginScreen({ onLogin }: { onLogin: (passcode: string) => void }) {
           )}
           <button
             type="submit"
-            disabled={loading || !input}
+            disabled={loading || !input || !adminName.trim()}
             className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-bold py-3 rounded-lg transition-colors"
           >
             {loading ? 'Memeriksa…' : 'Masuk'}
@@ -130,8 +151,9 @@ function StatusBadge({ status }: { status: OrderStatus }) {
 }
 
 // ─── Order Row ────────────────────────────────────────────────────────────────
-function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: string; onUpdated: (updated: Order) => void }) {
+function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; passcode: string; adminName: string; onUpdated: (updated: Order) => void }) {
   const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState('');
   const [retryingEmail, setRetryingEmail] = useState(false);
   const [retryError, setRetryError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -184,13 +206,19 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
       const res = await fetch(`${API_BASE}/admin/orders/${order.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-admin-passcode': passcode },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, changed_by: adminName }),
       });
       if (res.ok) {
         const updated = await res.json();
         onUpdated(updated);
+        setUpdateError('');
         if (historyOpen) void loadHistory(true);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setUpdateError(body.error ?? 'Gagal memperbarui status.');
       }
+    } catch {
+      setUpdateError('Tidak dapat terhubung ke server. Coba lagi.');
     } finally {
       setUpdating(false);
     }
@@ -350,6 +378,7 @@ function OrderRow({ order, passcode, onUpdated }: { order: Order; passcode: stri
       </div>
 
       {/* Status selector */}
+      {updateError && <p role="alert" className="mb-2 text-sm text-red-700">{updateError}</p>}
       <div className="flex items-center gap-2">
         <span className="text-slate-400 text-sm">Ubah status:</span>
         <div className="relative">
@@ -389,6 +418,9 @@ function StatusTimeline({ history }: { history: StatusHistoryEntry[] }) {
                   {cfg.label}
                 </p>
                 <p className="mt-0.5 text-xs text-slate-400">{formatDate(entry.changed_at)}</p>
+                <p className="mt-1 text-xs text-slate-500 break-words">
+                  {entry.changed_by ? `Oleh: ${entry.changed_by}` : 'Identitas belum tercatat'}
+                </p>
               </div>
             </div>
           </li>
@@ -399,7 +431,7 @@ function StatusTimeline({ history }: { history: StatusHistoryEntry[] }) {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({ passcode }: { passcode: string }) {
+function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminName: string; onLogout: () => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -454,8 +486,10 @@ function Dashboard({ passcode }: { passcode: string }) {
           <div>
             <h1 className="text-xl font-bold">Dashboard Pesanan</h1>
             <p className="text-slate-400 text-sm">DokumenProyek Admin</p>
+            <p className="text-slate-300 text-xs mt-1 break-words">Admin: {adminName} (diisi sendiri)</p>
           </div>
           <div className="flex items-center gap-3">
+            <button type="button" onClick={onLogout} className="text-sm text-slate-300 hover:text-white">Keluar</button>
             <button
               onClick={fetchOrders}
               className="inline-flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -543,7 +577,7 @@ function Dashboard({ passcode }: { passcode: string }) {
         ) : (
           <div className="space-y-3">
             {filtered.map(order => (
-              <OrderRow key={order.id} order={order} passcode={passcode} onUpdated={handleUpdated} />
+              <OrderRow key={order.id} order={order} passcode={passcode} adminName={adminName} onUpdated={handleUpdated} />
             ))}
           </div>
         )}
@@ -557,12 +591,24 @@ export default function AdminPesanan() {
   const [passcode, setPasscode] = useState<string | null>(
     sessionStorage.getItem('dp_admin_pc')
   );
+  const [adminName, setAdminName] = useState<string | null>(
+    sessionStorage.getItem('dp_admin_name')
+  );
 
-  const handleLogin = (pc: string) => {
+  const handleLogin = (pc: string, name: string) => {
     sessionStorage.setItem('dp_admin_pc', pc);
+    sessionStorage.setItem('dp_admin_name', name);
     setPasscode(pc);
+    setAdminName(name);
   };
 
-  if (!passcode) return <LoginScreen onLogin={handleLogin} />;
-  return <Dashboard passcode={passcode} />;
+  const handleLogout = () => {
+    sessionStorage.removeItem('dp_admin_pc');
+    sessionStorage.removeItem('dp_admin_name');
+    setPasscode(null);
+    setAdminName(null);
+  };
+
+  if (!passcode || !adminName?.trim()) return <LoginScreen onLogin={handleLogin} />;
+  return <Dashboard passcode={passcode} adminName={adminName} onLogout={handleLogout} />;
 }

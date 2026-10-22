@@ -14,6 +14,7 @@ import {
   type FailedBuyerEmailOrder,
 } from "../lib/buyer-email-retry";
 import type { OrderEmailData } from "../lib/mailer";
+import { decryptAdminActor, encryptAdminActor, withoutActorEnvelope } from "../lib/admin-actor";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -289,7 +290,7 @@ router.get("/admin/orders", requireAdmin, async (_req, res) => {
   if (error) {
     return res.status(500).json({ error: "Gagal memuat data pesanan." });
   }
-  return res.json(data);
+  return res.json(data.map(withoutActorEnvelope));
 });
 
 // ─── GET /api/admin/orders/:id — order detail with status history ──────────────
@@ -299,7 +300,7 @@ router.get("/admin/orders/:id", requireAdmin, async (req, res): Promise<void> =>
     supabase.from("orders").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("status_history")
-      .select("status, changed_at")
+      .select("status, changed_at, changed_by")
       .eq("order_id", id)
       .order("changed_at", { ascending: true }),
   ]);
@@ -330,25 +331,50 @@ router.get("/admin/orders/:id", requireAdmin, async (req, res): Promise<void> =>
     req.log.warn({ orderId: id }, "status_history table is unavailable; returning empty history");
   }
 
-  res.json({
-    ...orderResult.data,
-    history: Array.isArray(historyResult.data) ? historyResult.data : [],
-  });
+  try {
+    res.json({
+      ...withoutActorEnvelope(orderResult.data),
+      history: Array.isArray(historyResult.data)
+        ? historyResult.data.map(entry => ({
+            status: entry.status,
+            changed_at: entry.changed_at,
+            changed_by: decryptAdminActor(entry.changed_by, id),
+          }))
+        : [],
+    });
+  } catch {
+    req.log.error({ orderId: id }, "Failed to decrypt admin audit identity");
+    res.status(500).json({ error: "Gagal membaca identitas admin pada riwayat status." });
+  }
 });
 
 // ─── PATCH /api/admin/orders/:id/status ──────────────────────────────────────
 router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body as { status: string };
+  const { status, changed_by } = req.body ?? {};
+  // Shared-passcode admins declare their name; this is not a verified account.
+  // Validate before writing, and persist the name with the status atomically.
+  const adminName = typeof changed_by === "string" ? changed_by.trim() : "";
+  if (!adminName || adminName.length > 80 || /[\u0000-\u001f\u007f]/.test(adminName)) {
+    return res.status(400).json({ error: "Nama admin wajib diisi, maksimal 80 karakter tanpa karakter kontrol." });
+  }
 
   const VALID = ["baru", "diproses", "selesai", "dibatalkan"];
   if (!VALID.includes(status)) {
     return res.status(400).json({ error: "Status tidak valid." });
   }
 
+  let encryptedActor: string;
+  try {
+    encryptedActor = encryptAdminActor(adminName, id);
+  } catch {
+    req.log.error("Admin audit encryption is not configured");
+    return res.status(503).json({ error: "Pencatatan identitas admin belum siap. Status tidak diubah." });
+  }
+
   const { data, error } = await supabase
     .from("orders")
-    .update({ status })
+    .update({ status, status_changed_by: encryptedActor })
     .eq("id", id)
     .select()
     .single();
@@ -421,7 +447,7 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
     }
   })();
 
-  return res.json(data);
+  return res.json(withoutActorEnvelope(data));
 });
 
 // ─── POST /api/admin/orders/:id/retry-buyer-email ────────────────────────────

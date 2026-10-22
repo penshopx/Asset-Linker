@@ -30,8 +30,10 @@ describe("status history migration", () => {
         /IF TG_OP = 'INSERT'[\s\S]*INSERT INTO status_history \(order_id, status\) VALUES \(NEW\.id, NEW\.status\)/,
       );
       expect(sql).toMatch(
-        /ELSIF TG_OP = 'UPDATE' AND OLD\.status IS DISTINCT FROM NEW\.status[\s\S]*INSERT INTO status_history \(order_id, status\) VALUES \(NEW\.id, NEW\.status\)/,
+        /ELSIF TG_OP = 'UPDATE' AND OLD\.status IS DISTINCT FROM NEW\.status[\s\S]*INSERT INTO status_history \(order_id, status, changed_by\)\s*VALUES \(NEW\.id, NEW\.status, NEW\.status_changed_by\)/,
       );
+      expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS status_changed_by TEXT DEFAULT NULL/);
+      expect(sql).toMatch(/ALTER TABLE status_history ADD COLUMN IF NOT EXISTS changed_by TEXT DEFAULT NULL/);
     },
   );
 });

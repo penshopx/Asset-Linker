@@ -5,6 +5,46 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type OrderStatus = typeof OrderStatus[keyof typeof OrderStatus];
+
+
+export const OrderStatus = {
+  baru: 'baru',
+  diproses: 'diproses',
+  selesai: 'selesai',
+  dibatalkan: 'dibatalkan',
+} as const;
+
+export interface OrderStatusChangeInput {
+  status: OrderStatus;
+  /**
+     * Trimmed self-declared admin name, no control characters; not a verified personal account.
+     * @minLength 1
+     * @maxLength 80
+     */
+  changed_by: string;
+}
+
+export interface AdminOrder {
+  id: string;
+  status: OrderStatus;
+  [key: string]: unknown;
+ }
+
+export interface AdminStatusHistoryEntry {
+  status: OrderStatus;
+  changed_at: string;
+  /**
+     * Absent or null for legacy entries and initial buyer submission.
+     * @nullable
+     */
+  changed_by?: string | null;
+}
+
+export type AdminOrderDetail = AdminOrder & {
+  history: AdminStatusHistoryEntry[];
+};
+
 export type EmailReadinessStatusStatus = typeof EmailReadinessStatusStatus[keyof typeof EmailReadinessStatusStatus];
 
 
@@ -46,4 +86,6 @@ export interface EmailReadinessStatus {
 export interface HealthStatus {
   status: string;
 }
+
+export type AdminPasscodeParameter = string;
 

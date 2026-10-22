@@ -21,7 +21,8 @@ ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS buyer_email_delivery_state TEXT DEFAULT 'pending' NOT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_retry_count INTEGER DEFAULT 0 NOT NULL,
   ADD COLUMN IF NOT EXISTS buyer_email_last_attempt_at TIMESTAMPTZ DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS status_email_error TEXT DEFAULT NULL;
+  ADD COLUMN IF NOT EXISTS status_email_error TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS status_changed_by TEXT DEFAULT NULL;
 
 UPDATE orders
 SET buyer_email_delivery_state = CASE
@@ -153,6 +154,21 @@ CREATE TABLE IF NOT EXISTS status_history (
 
 CREATE INDEX IF NOT EXISTS status_history_order_id_idx ON status_history (order_id, changed_at);
 
+ALTER TABLE status_history ADD COLUMN IF NOT EXISTS changed_by TEXT DEFAULT NULL;
+
+-- Actor names are encrypted by the API before reaching the anon-key client.
+-- SESSION_SECRET stays on the server; no SQL function receives the key.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orders_actor_encrypted' AND conrelid = 'orders'::regclass) THEN
+    ALTER TABLE orders ADD CONSTRAINT orders_actor_encrypted
+      CHECK (status_changed_by IS NULL OR status_changed_by ~ '^enc:v1:[A-Za-z0-9+/=]+$');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'history_actor_encrypted' AND conrelid = 'status_history'::regclass) THEN
+    ALTER TABLE status_history ADD CONSTRAINT history_actor_encrypted
+      CHECK (changed_by IS NULL OR changed_by ~ '^enc:v1:[A-Za-z0-9+/=]+$');
+  END IF;
+END $$;
+
 ALTER TABLE status_history ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
@@ -174,7 +190,8 @@ BEGIN
   IF TG_OP = 'INSERT' THEN
     INSERT INTO status_history (order_id, status) VALUES (NEW.id, NEW.status);
   ELSIF TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
-    INSERT INTO status_history (order_id, status) VALUES (NEW.id, NEW.status);
+    INSERT INTO status_history (order_id, status, changed_by)
+      VALUES (NEW.id, NEW.status, NEW.status_changed_by);
   END IF;
   RETURN NEW;
 END;

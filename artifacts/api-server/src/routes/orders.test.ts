@@ -21,8 +21,9 @@
  *      a. Second concurrent request sharing a key → 200 with order_id AND duplicate:true.
  */
 
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
+import { decryptAdminActor, encryptAdminActor } from '../lib/admin-actor';
 
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 const mockRpc = vi.fn();
@@ -76,6 +77,7 @@ const FAKE_HISTORY = [
 ];
 
 beforeEach(() => {
+  vi.stubEnv('SESSION_SECRET', 'audit-test-key-only');
   mockStorageUpload.mockResolvedValue({ error: null });
   mockStorageRemove.mockResolvedValue({ error: null });
   mockGetPublicUrl.mockReturnValue({ data: { publicUrl: null } });
@@ -85,6 +87,8 @@ beforeEach(() => {
     getPublicUrl: mockGetPublicUrl,
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 /** RPC result rows for a brand-new order (is_duplicate = false). */
 function rpcNewOrder(orderId = FAKE_ORDER.id) {
@@ -203,11 +207,13 @@ describe('GET /api/admin/orders/:id', () => {
   it('returns the order and status history in chronological order', async () => {
     const history = [
       { status: 'baru', changed_at: '2026-08-30T08:00:00.000Z' },
-      { status: 'diproses', changed_at: '2026-08-30T09:00:00.000Z' },
+      { status: 'diproses', changed_at: '2026-08-30T09:00:00.000Z', changed_by: encryptAdminActor('Admin Rina', FAKE_ORDER.id) },
     ];
+    const historyQuery = buildQueryStub({ data: history, error: null });
+    historyQuery.select = vi.fn(() => historyQuery);
     mockFrom
       .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
-      .mockReturnValueOnce(buildQueryStub({ data: history, error: null }));
+      .mockReturnValueOnce(historyQuery);
 
     const res = await request(app)
       .get('/api/admin/orders/order-uuid-123')
@@ -215,10 +221,14 @@ describe('GET /api/admin/orders/:id', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(FAKE_ORDER.id);
-    expect(res.body.history).toEqual(history);
+    expect(res.body.history).toEqual([
+      { ...history[0], changed_by: null },
+      { ...history[1], changed_by: 'Admin Rina' },
+    ]);
     expect(res.body.history[0].status).toBe('baru');
     expect(mockFrom).toHaveBeenNthCalledWith(1, 'orders');
     expect(mockFrom).toHaveBeenNthCalledWith(2, 'status_history');
+    expect(mockFrom.mock.results[1].value.select).toHaveBeenCalledWith('status, changed_at, changed_by');
   });
 
   it('returns 404 when the admin order does not exist', async () => {
@@ -231,6 +241,26 @@ describe('GET /api/admin/orders/:id', () => {
       .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
 
     expect(res.status).toBe(404);
+  });
+
+  it('never returns an actor name to an unauthenticated request', async () => {
+    const res = await request(app).get(`/api/admin/orders/${FAKE_ORDER.id}`);
+    expect(res.status).toBe(401);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it('fails explicitly when an encrypted identity cannot be read', async () => {
+    mockFrom
+      .mockReturnValueOnce(buildQueryStub({ data: { ...FAKE_ORDER }, error: null }))
+      .mockReturnValueOnce(buildQueryStub({
+        data: [{ status: 'diproses', changed_at: FAKE_ORDER.created_at, changed_by: 'invalid-plaintext' }],
+        error: null,
+      }));
+    const res = await request(app)
+      .get(`/api/admin/orders/${FAKE_ORDER.id}`)
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain('invalid-plaintext');
   });
 
   it('returns an empty history when the status-history migration is unavailable', async () => {
@@ -258,6 +288,36 @@ describe('GET /api/admin/orders/:id', () => {
 describe('PATCH /api/admin/orders/:id/status — no direct status_history writes', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it('does not change the status if the audit encryption key is missing', async () => {
+    vi.stubEnv('SESSION_SECRET', '');
+    const res = await request(app)
+      .patch(`/api/admin/orders/${FAKE_ORDER.id}/status`)
+      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
+      .send({ status: 'diproses', changed_by: 'Admin Rina' });
+    expect(res.status).toBe(503);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, '', '   ', 123, 'x'.repeat(81), 'Admin\nRina'])(
+    'rejects invalid admin identity %j without touching the database',
+    async (changed_by) => {
+      const res = await request(app)
+        .patch('/api/admin/orders/order-uuid-123/status')
+        .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
+        .send({ status: 'diproses', changed_by });
+      expect(res.status).toBe(400);
+      expect(mockFrom).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an unauthenticated actor before writing', async () => {
+    const res = await request(app)
+      .patch('/api/admin/orders/order-uuid-123/status')
+      .send({ status: 'diproses', changed_by: 'Admin Rina' });
+    expect(res.status).toBe(401);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
   it('updates the order status so the database trigger records the new history row', async () => {
     mockFrom.mockReturnValue(
       buildQueryStub({ data: { ...FAKE_ORDER, status: 'diproses' }, error: null })
@@ -266,12 +326,15 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
       .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses' });
+      .send({ status: 'diproses', changed_by: '  Admin Rina  ' });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('diproses');
     const orderUpdate = (mockFrom.mock.results[0]?.value as Record<string, ReturnType<typeof vi.fn>>)['update'];
-    expect(orderUpdate).toHaveBeenCalledWith({ status: 'diproses' });
+    expect(orderUpdate).toHaveBeenCalledWith({ status: 'diproses', status_changed_by: expect.stringMatching(/^enc:v1:/) });
+    const envelope = orderUpdate.mock.calls[0][0].status_changed_by;
+    expect(envelope).not.toContain('Admin Rina');
+    expect(decryptAdminActor(envelope, FAKE_ORDER.id)).toBe('Admin Rina');
 
     // The trigger owns history insertion; the API must not bypass it with a
     // direct write that would violate the table's RLS policy.
@@ -285,7 +348,7 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
       .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'invalid-status' });
+      .send({ status: 'invalid-status', changed_by: 'Admin Rina' });
 
     expect(res.status).toBe(400);
   });
@@ -302,7 +365,7 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
       .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses' });
+      .send({ status: 'diproses', changed_by: 'Admin Rina' });
 
     expect(res.status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -325,7 +388,7 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
       .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses' });
+      .send({ status: 'diproses', changed_by: 'Admin Rina' });
 
     expect(res.status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));

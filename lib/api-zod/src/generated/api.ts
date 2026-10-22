@@ -9,6 +9,55 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Order detail with admin-only actor names
+ */
+export const GetAdminOrderParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetAdminOrderHeader = zod.object({
+  "x-admin-passcode": zod.string()
+})
+
+export const GetAdminOrderResponse = zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan'])
+}).and(zod.object({
+  "history": zod.array(zod.object({
+  "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan']),
+  "changed_at": zod.coerce.date(),
+  "changed_by": zod.string().nullish().describe('Absent or null for legacy entries and initial buyer submission.')
+}))
+}))
+
+
+/**
+ * @summary Change status with a self-declared shared-passcode admin name
+ */
+export const ChangeAdminOrderStatusParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ChangeAdminOrderStatusHeader = zod.object({
+  "x-admin-passcode": zod.string()
+})
+
+export const changeAdminOrderStatusBodyChangedByMax = 80;
+
+
+
+export const ChangeAdminOrderStatusBody = zod.object({
+  "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan']),
+  "changed_by": zod.string().min(1).max(changeAdminOrderStatusBodyChangedByMax).describe('Trimmed self-declared admin name, no control characters; not a verified personal account.')
+})
+
+export const ChangeAdminOrderStatusResponse = zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan'])
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */

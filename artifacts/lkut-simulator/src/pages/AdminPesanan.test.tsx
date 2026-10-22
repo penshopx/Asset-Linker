@@ -71,7 +71,9 @@ function expectFailureCount(count: number) {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('sessionStorage', {
-    getItem: vi.fn((key: string) => key === 'dp_admin_pc' ? PASSCODE : null),
+    getItem: vi.fn((key: string) => key === 'dp_admin_pc' ? PASSCODE : key === 'dp_admin_name' ? 'Admin Rina' : null),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
   });
   vi.stubGlobal('window', {
     setInterval: vi.fn(() => 1),
@@ -214,5 +216,80 @@ describe('admin buyer email warning integration', () => {
     expect(visibleText()).not.toContain(ORIGINAL_ERROR);
     expect(renderer!.root.findAllByType('button').filter(node => text(node) === 'Coba kirim ulang')).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('admin identity and timeline', () => {
+  it('requires a name when resuming an old passcode-only session', async () => {
+    vi.mocked(sessionStorage.getItem).mockImplementation(key => key === 'dp_admin_pc' ? PASSCODE : null);
+    await mount();
+    expect(visibleText()).toContain('Nama admin');
+    expect(visibleText()).toContain('bukan akun terverifikasi');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('stores the trimmed name when logging in and clears it on logout', async () => {
+    vi.mocked(sessionStorage.getItem).mockReturnValue(null);
+    await mount();
+    await act(async () => {
+      renderer!.root.findByProps({ type: 'text' }).props.onChange({ target: { value: '  Admin Rina  ' } });
+      renderer!.root.findByProps({ type: 'password' }).props.onChange({ target: { value: PASSCODE } });
+    });
+    await act(async () => {
+      await renderer!.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    expect(sessionStorage.setItem).toHaveBeenCalledWith('dp_admin_name', 'Admin Rina');
+    expect(visibleText()).toContain('Admin: Admin Rina (diisi sendiri)');
+    await click('Keluar');
+    expect(sessionStorage.removeItem).toHaveBeenCalledWith('dp_admin_name');
+    expect(sessionStorage.removeItem).toHaveBeenCalledWith('dp_admin_pc');
+    expect(visibleText()).toContain('Nama admin');
+  });
+
+  it('sends the session identity and refreshes the open timeline after a change', async () => {
+    const current = order('one');
+    serverOrders = [current];
+    let changed = false;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === LIST_URL) return { ok: true, json: async () => serverOrders };
+      if (init?.method === 'PATCH') {
+        expect(JSON.parse(init.body as string)).toEqual({ status: 'diproses', changed_by: 'Admin Rina' });
+        expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'x-admin-passcode': PASSCODE });
+        changed = true;
+        return { ok: true, json: async () => ({ ...current, status: 'diproses' }) };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          ...current,
+          history: [
+            { status: 'baru', changed_at: current.created_at, changed_by: null },
+            ...(changed ? [{ status: 'diproses', changed_at: current.created_at, changed_by: 'Admin Rina' }] : []),
+          ],
+        }),
+      };
+    });
+    await mount();
+    await click('Lihat riwayat status');
+    expect(visibleText()).toContain('Identitas belum tercatat');
+    await act(async () => {
+      await renderer!.root.findByType('select').props.onChange({ target: { value: 'diproses' } });
+    });
+    expect(visibleText()).toContain('Oleh: Admin Rina');
+    expect(visibleText()).toContain('Identitas belum tercatat');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('shows a rejected status change instead of claiming it was saved', async () => {
+    serverOrders = [order('one')];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method === 'PATCH'
+      ? { ok: false, json: async () => ({ error: 'Nama admin wajib diisi.' }) }
+      : { ok: true, json: async () => serverOrders });
+    await mount();
+    await act(async () => {
+      await renderer!.root.findByType('select').props.onChange({ target: { value: 'diproses' } });
+    });
+    expect(visibleText()).toContain('Nama admin wajib diisi.');
+    expect(renderer!.root.findByType('select').props.value).toBe('baru');
   });
 });

@@ -11,6 +11,54 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /admin/orders/{id}:
+    get:
+      operationId: getAdminOrder
+      summary: Order detail with admin-only actor names
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+        - $ref: "#/components/parameters/AdminPasscode"
+      responses:
+        "200":
+          description: Order detail and chronological history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOrderDetail"
+        "401":
+          description: Invalid or missing passcode
+        "404":
+          description: Order not found
+        "500":
+          description: Database failure
+  /admin/orders/{id}/status:
+    patch:
+      operationId: changeAdminOrderStatus
+      summary: Change status with a self-declared shared-passcode admin name
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+        - $ref: "#/components/parameters/AdminPasscode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderStatusChangeInput"
+      responses:
+        "200":
+          description: Updated order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOrder"
+        "400":
+          description: Invalid status or missing/invalid admin name
+        "401":
+          description: Invalid or missing passcode
+        "500":
+          description: Status was not saved
+        "503":
+          description: Server audit encryption is not configured; status was not changed
   /healthz:
     get:
       operationId: healthCheck
@@ -50,7 +98,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmailReadinessStatus"
 components:
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    AdminPasscode:
+      name: x-admin-passcode
+      in: header
+      required: true
+      schema:
+        type: string
   schemas:
+    OrderStatus:
+      type: string
+      enum: [baru, diproses, selesai, dibatalkan]
+    OrderStatusChangeInput:
+      type: object
+      required: [status, changed_by]
+      properties:
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        changed_by:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Trimmed self-declared admin name, no control characters; not a verified personal account.
+    AdminOrder:
+      type: object
+      additionalProperties: true
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+    AdminOrderDetail:
+      allOf:
+        - $ref: "#/components/schemas/AdminOrder"
+        - type: object
+          required: [history]
+          properties:
+            history:
+              type: array
+              items:
+                $ref: "#/components/schemas/AdminStatusHistoryEntry"
+    AdminStatusHistoryEntry:
+      type: object
+      required: [status, changed_at]
+      properties:
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        changed_at:
+          type: string
+          format: date-time
+        changed_by:
+          type: [string, "null"]
+          description: Absent or null for legacy entries and initial buyer submission.
     EmailReadinessStatus:
       type: object
       required: [status, email]
