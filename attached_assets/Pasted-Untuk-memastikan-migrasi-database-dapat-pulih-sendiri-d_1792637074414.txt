@@ -1,0 +1,105 @@
+Untuk memastikan migrasi database dapat pulih sendiri dari gangguan koneksi sementara (seperti kegagalan DNS Supabase), Anda perlu mengubah logika startup dari "coba sekali dan abaikan error" menjadi **mekanisme retry dengan exponential backoff**, diikuti dengan strategi *fail-fast* jika semua percobaan habis.
+
+Berikut adalah panduan langkah demi langkah untuk mengimplementasikan solusi ini:
+
+### 1. Implementasi Retry dengan Exponential Backoff
+Buat fungsi pembungkus (wrapper) untuk proses migrasi Anda. Fungsi ini akan mencoba ulang migrasi dengan jeda waktu yang semakin lama (misalnya: 2 detik, 4 detik, 8 detik, dst.) untuk memberi waktu pada DNS atau jaringan untuk pulih.
+
+Contoh implementasi dalam JavaScript/TypeScript (Node.js):
+
+```javascript
+/**
+ * Menjalankan migrasi database dengan mekanisme retry otomatis.
+ * @param {Function} migrationFn - Fungsi yang menjalankan migrasi asli Anda.
+ * @param {number} maxRetries - Jumlah maksimum percobaan (default: 5).
+ * @param {number} baseDelay - Jeda awal dalam milidetik (default: 2000ms / 2 detik).
+ */
+async function runMigrationsWithRetry(migrationFn, maxRetries = 5, baseDelay = 2000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[Migrasi] Mencoba menjalankan migrasi (Percobaan ${attempt}/${maxRetries})...`);
+      
+      await migrationFn(); // Panggil fungsi migrasi asli Anda di sini
+      
+      console.log("[Migrasi] Berhasil diterapkan.");
+      return; // Keluar dari loop jika berhasil
+    } catch (error) {
+      console.warn(`[Migrasi] Gagal: ${error.message}`);
+      
+      if (attempt === maxRetries) {
+        console.error("[Migrasi] KRITIS: Semua percobaan migrasi habis.");
+        throw error; // Lempar error agar proses bisa dihentikan (lihat Langkah 3)
+      }
+
+      // Hitung delay dengan exponential backoff (2s, 4s, 8s, 16s, ...)
+      // Tambahkan sedikit jitter (acak) untuk mencegah thundering herd jika banyak instance restart bersamaan
+      const jitter = Math.random() * 1000; 
+      const delay = (baseDelay * Math.pow(2, attempt - 1)) + jitter;
+      
+      console.log(`[Migrasi] Menunggu ${Math.round(delay)}ms sebelum mencoba lagi...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
+// Cara penggunaan saat startup:
+// await runMigrationsWithRetry(() => supabaseMigrate(), 5, 2000);
+```
+
+### 2. Pastikan Migrasi Bersifat Idempoten (Idempotent)
+Karena migrasi akan dijalankan berulang kali, **sangat penting** untuk memastikan skrip migrasi Anda aman dijalankan berkali-kali tanpa menyebabkan error atau duplikasi data. 
+* Jika menggunakan SQL mentah, gunakan `IF NOT EXISTS`.
+  ```sql
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS new_feature_flag BOOLEAN DEFAULT false;
+  ```
+* Jika menggunakan ORM (Prisma, Knex, TypeORM, atau Supabase CLI), pastikan alat tersebut mendukung idempotensi secara default (sebagian besar alat migrasi modern sudah melakukannya dengan melacak tabel `schema_migrations`).
+
+### 3. Terapkan Strategi "Fail-Fast" (Sangat Disarankan)
+Jika setelah 5 kali percobaan migrasi tetap gagal, **jangan biarkan server terus berjalan dalam keadaan "sehat" tapi tidak lengkap**. Ini akan menyebabkan error yang lebih aneh di kemudian hari (misalnya, query gagal karena kolom tidak ditemukan).
+
+Sebaliknya, hentikan proses secara paksa (`process.exit(1)`). 
+
+**Mengapa ini bagus?**
+Jika Anda menjalankan aplikasi di dalam Docker, Kubernetes, PM2, atau systemd, proses yang *crash* akan **otomatis di-restart** oleh orchestrator tersebut. Restart ini memberikan lingkungan jaringan yang benar-benar baru dan sering kali berhasil menyelesaikan masalah DNS sementara.
+
+```javascript
+async function startServer() {
+  try {
+    await runMigrationsWithRetry(applyDatabaseMigrations, 5, 2000);
+    
+    // Jika migrasi sukses, baru mulai server
+    app.listen(PORT, () => {
+      console.log(`Server berjalan di port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Server tidak dapat dimulai karena migrasi database gagal.");
+    // Hentikan proses. Docker/K8s/PM2 akan otomatis me-restart container/proses ini.
+    process.exit(1); 
+  }
+}
+
+startServer();
+```
+
+### 4. (Opsional) Health Check yang Memverifikasi Skema
+Jika Anda menggunakan Kubernetes atau load balancer, ubah *Readiness Probe* Anda. Jangan hanya memeriksa apakah server HTTP merespons (misalnya, endpoint `/health` yang hanya mengembalikan `200 OK`). 
+
+Buat endpoint `/health` yang juga memverifikasi koneksi database atau keberadaan kolom kritis:
+```javascript
+app.get('/health', async (req, res) => {
+  try {
+    // Coba query sederhana ke tabel yang baru dimigrasi
+    await db.query('SELECT 1 FROM users LIMIT 1'); 
+    res.status(200).send({ status: 'ready', database: 'connected' });
+  } catch (err) {
+    res.status(503).send({ status: 'not_ready', database: 'disconnected_or_schema_mismatch' });
+  }
+});
+```
+Dengan cara ini, jika migrasi gagal dan server somehow tetap hidup, load balancer tidak akan mengirim trafik ke instance tersebut hingga database benar-benar siap.
+
+### Ringkasan Perbaikan:
+1. Ganti `.catch(() => {})` dengan loop **retry + exponential backoff**.
+2. Pastikan skrip migrasi **idempoten** (`IF NOT EXISTS`).
+3. Jika retry habis, gunakan **`process.exit(1)`** agar orchestrator (Docker/K8s) mengambil alih dan me-restart proses dengan state jaringan yang baru.
+4. Perbarui **health check** untuk memvalidasi kesiapan database, bukan hanya ketersediaan port server.
