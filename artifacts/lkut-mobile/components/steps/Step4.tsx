@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Platform, Linking, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Platform, Linking, Alert, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
+import * as Clipboard from 'expo-clipboard';
 import { useColors } from '@/hooks/useColors';
 import { useForm } from '@/context/FormContext';
 import {
@@ -76,6 +77,8 @@ export function Step4({ onReset }: Step4Props) {
   const colors = useColors();
   const { data } = useForm();
   const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [failedURL, setFailedURL] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState('');
 
   const { indicatorScores, financialScore, orgScore, managementScore, projectScore, finalScore, grade } = calculateResult(data);
   const gradeColor = getGradeColor(grade);
@@ -84,6 +87,23 @@ export function Step4({ onReset }: Step4Props) {
   const lowestKeys = getLowestIndicators(indicatorScores, 3);
   const salesAlerts = getSalesAlerts(data, indicatorScores);
 
+  const copyURL = async (url: string) => {
+    let copied = false;
+    try {
+      copied = await Clipboard.setStringAsync(url);
+    } catch {
+      // Clipboard permissions can be denied; keep the URL available manually.
+    }
+    const message = copied
+      ? 'Tautan disalin. Tempelkan di browser Anda.'
+      : 'Tautan belum dapat disalin. Silakan salin alamat berikut secara manual.';
+    if (Platform.OS === 'web') {
+      setCopyFeedback(message);
+    } else {
+      Alert.alert(copied ? 'Tautan disalin' : 'Gagal menyalin tautan', `${message}\n\n${url}`);
+    }
+  };
+
   const openURL = async (url: string) => {
     try {
       await Linking.openURL(url);
@@ -91,9 +111,13 @@ export function Step4({ onReset }: Step4Props) {
       const title = 'Tautan tidak dapat dibuka';
       const message = 'Silakan coba lagi atau buka tautan melalui browser Anda.';
       if (Platform.OS === 'web') {
-        window.alert(`${title}\n${message}`);
+        setCopyFeedback('');
+        setFailedURL(url);
       } else {
-        Alert.alert(title, message);
+        Alert.alert(title, `${message}\n\n${url}`, [
+          { text: 'Tutup', style: 'cancel' },
+          { text: 'Salin tautan', onPress: () => { void copyURL(url); } },
+        ]);
       }
       // Haptics are optional; their availability must not affect link feedback.
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
@@ -112,6 +136,55 @@ export function Step4({ onReset }: Step4Props) {
 
   return (
     <View>
+      {failedURL !== null && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setFailedURL(null)}
+        >
+          <View style={[styles.linkFailureOverlay, { backgroundColor: colors.primary }]}>
+            <View
+              style={[styles.linkFailureCard, { backgroundColor: colors.card, borderRadius: colors.radius }]}
+              accessibilityViewIsModal
+              testID="link-failure-dialog"
+            >
+              <Text accessibilityRole="header" style={[styles.cardTitle, { color: colors.foreground }]}>
+                Tautan tidak dapat dibuka
+              </Text>
+              <Text style={{ color: colors.foreground }}>
+                Silakan coba lagi atau buka tautan melalui browser Anda.
+              </Text>
+              <Text selectable style={[styles.linkFailureURL, { color: colors.foreground }]} testID="link-failure-url">
+                {failedURL}
+              </Text>
+              {copyFeedback !== '' && (
+                <Text accessibilityLiveRegion="polite" style={{ color: colors.foreground }} testID="link-copy-feedback">
+                  {copyFeedback}
+                </Text>
+              )}
+              <View style={styles.ctaRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="link-failure-close"
+                  onPress={() => setFailedURL(null)}
+                  style={[styles.ctaBtn, { borderColor: colors.border, borderRadius: colors.radius }]}
+                >
+                  <Text style={{ color: colors.foreground }}>Tutup</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="link-failure-copy"
+                  onPress={() => copyURL(failedURL)}
+                  style={[styles.ctaBtn, { backgroundColor: colors.primary, borderColor: colors.primary, borderRadius: colors.radius }]}
+                >
+                  <Text style={{ color: colors.primaryForeground }}>Salin tautan</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
       {/* PUB Warning */}
       {needsPUB && (
         <Pressable
@@ -326,6 +399,22 @@ export function Step4({ onReset }: Step4Props) {
 }
 
 const styles = StyleSheet.create({
+  linkFailureOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  linkFailureCard: {
+    width: '100%',
+    maxWidth: 460,
+    padding: 20,
+    gap: 12,
+  },
+  linkFailureURL: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
   warningBanner: {
     backgroundColor: '#fee2e2',
     borderWidth: 1,

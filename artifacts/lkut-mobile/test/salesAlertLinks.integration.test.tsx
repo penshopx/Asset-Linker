@@ -27,6 +27,11 @@ import * as Haptics from 'expo-haptics';
 const mockOpenURL = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockOpenBrowser = vi.hoisted(() => vi.fn().mockResolvedValue({ type: 'dismiss' }));
 const mockAlert = vi.hoisted(() => vi.fn());
+const mockSetString = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+
+vi.mock('expo-clipboard', () => ({
+  setStringAsync: mockSetString,
+}));
 
 vi.mock('expo-web-browser', () => ({
   openBrowserAsync: mockOpenBrowser,
@@ -40,6 +45,8 @@ vi.mock('expo-document-picker', () => ({
 // Replaces native modules with plain React elements so react-test-renderer
 // can render the component tree in Node without a native runtime.
 vi.mock('react-native', () => ({
+  Modal: ({ children, onRequestClose }: any) =>
+    React.createElement('Modal', { onRequestClose }, children),
   View: ({ children, testID, style }: any) =>
     React.createElement('View', { testID }, children),
   Text: ({ children, style, numberOfLines }: any) =>
@@ -182,6 +189,7 @@ describe('Sales alert product links — integration', () => {
     vi.clearAllMocks();
     mockOpenURL.mockReset().mockResolvedValue(undefined);
     mockOpenBrowser.mockReset().mockResolvedValue({ type: 'dismiss' });
+    mockSetString.mockReset().mockResolvedValue(true);
     Platform.OS = 'ios';
     // Reset to safe defaults before each test so mocks don't bleed across.
     currentFormData = { ...mockFormData };
@@ -431,7 +439,11 @@ describe('Sales alert product links — integration', () => {
       expect(mockOpenURL).toHaveBeenCalledExactlyOnceWith(`${BASE}/paket-tuntas-pkb-skk-jenjang-8`);
       expect(Alert.alert).toHaveBeenCalledExactlyOnceWith(
         'Tautan tidak dapat dibuka',
-        'Silakan coba lagi atau buka tautan melalui browser Anda.',
+        `Silakan coba lagi atau buka tautan melalui browser Anda.\n\n${BASE}/paket-tuntas-pkb-skk-jenjang-8`,
+        [
+          { text: 'Tutup', style: 'cancel' },
+          { text: 'Salin tautan', onPress: expect.any(Function) },
+        ],
       );
       expect(Haptics.notificationAsync).toHaveBeenCalledExactlyOnceWith(Haptics.NotificationFeedbackType.Error);
       expect(Haptics.impactAsync).not.toHaveBeenCalled();
@@ -445,28 +457,26 @@ describe('Sales alert product links — integration', () => {
       expect(Haptics.impactAsync).toHaveBeenCalledExactlyOnceWith(Haptics.ImpactFeedbackStyle.Medium);
     });
 
-    it('shows a browser alert when a product link fails on web', async () => {
+    it('shows a dismissible copy dialog when a product link fails on web', async () => {
       Platform.OS = 'web';
-      const alert = vi.fn();
-      vi.stubGlobal('window', { alert });
       mockOpenURL.mockRejectedValueOnce(new Error('Link blocked'));
       currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
       const root = renderStep4();
 
-      try {
-        await act(async () => {
-          await root.findByProps({ testID: 'alert-product-skk-0' }).props.onPress();
-        });
+      await act(async () => {
+        await root.findByProps({ testID: 'alert-product-skk-0' }).props.onPress();
+      });
 
-        expect(alert).toHaveBeenCalledExactlyOnceWith(
-          'Tautan tidak dapat dibuka\nSilakan coba lagi atau buka tautan melalui browser Anda.',
-        );
-        expect(Alert.alert).not.toHaveBeenCalled();
-        expect(Haptics.notificationAsync).toHaveBeenCalledExactlyOnceWith(Haptics.NotificationFeedbackType.Error);
-        expect(Haptics.impactAsync).not.toHaveBeenCalled();
-      } finally {
-        vi.unstubAllGlobals();
-      }
+      expect(root.findByProps({ testID: 'link-failure-url' }).props.children).toBe(
+        `${BASE}/paket-tuntas-pkb-skk-jenjang-8`,
+      );
+      expect(Alert.alert).not.toHaveBeenCalled();
+      expect(mockSetString).not.toHaveBeenCalled();
+      expect(Haptics.notificationAsync).toHaveBeenCalledExactlyOnceWith(Haptics.NotificationFeedbackType.Error);
+      expect(Haptics.impactAsync).not.toHaveBeenCalled();
+      pressByTestID(root, 'link-failure-close');
+      expect(root.findAllByProps({ testID: 'link-failure-dialog' })).toHaveLength(0);
+      expect(mockSetString).not.toHaveBeenCalled();
     });
 
     it('openURL is NOT called before any button is pressed', () => {
@@ -484,5 +494,98 @@ describe('Sales alert product links — integration', () => {
 
       expect(mockOpenURL).toHaveBeenCalledTimes(2);
     });
+  });
+
+  describe.each(['ios', 'android', 'web'] as const)('copy failed product links on %s', (platform) => {
+    async function failAndCopy(root: ReturnType<typeof create>['root'], buttonID: string) {
+      mockOpenURL.mockRejectedValueOnce(new Error('Link blocked'));
+      await act(async () => {
+        await root.findByProps({ testID: buttonID }).props.onPress();
+      });
+      if (platform === 'web') {
+        await act(async () => {
+          await root.findByProps({ testID: 'link-failure-copy' }).props.onPress();
+        });
+      } else {
+        const buttons = mockAlert.mock.lastCall![2];
+        expect(buttons).toEqual([
+          { text: 'Tutup', style: 'cancel' },
+          { text: 'Salin tautan', onPress: expect.any(Function) },
+        ]);
+        expect(mockSetString).not.toHaveBeenCalled();
+        await act(async () => {
+          buttons[1].onPress();
+        });
+      }
+    }
+
+    beforeEach(() => {
+      Platform.OS = platform;
+      currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
+    });
+
+    it.each([
+      { buttonID: 'alert-product-skk-0', url: `${BASE}/paket-tuntas-pkb-skk-jenjang-8` },
+      { buttonID: 'alert-product-skk-1', url: `${BASE}/exec-summary-pkb-siap-perpanjangan-skk` },
+      { buttonID: 'action-btn-hrEmpowerment', url: 'https://gaia.dokumenproyek.com' },
+    ])('copies exactly the URL for $buttonID', async ({ buttonID, url }) => {
+      currentFormData = { ...currentFormData, hrEmpowerment: 0 };
+      const root = renderStep4();
+      await failAndCopy(root, buttonID);
+      expect(mockOpenURL).toHaveBeenCalledExactlyOnceWith(url);
+      expect(mockSetString).toHaveBeenCalledExactlyOnceWith(url);
+      if (platform === 'web') {
+        expect(root.findByProps({ testID: 'link-copy-feedback' }).props.children).toContain('Tautan disalin.');
+      } else {
+        expect(mockAlert.mock.lastCall![0]).toBe('Tautan disalin');
+      }
+    });
+
+    it.each(['reject', 'false'] as const)('reports clipboard failure (%s) without claiming success', async (failure) => {
+      if (failure === 'reject') mockSetString.mockRejectedValueOnce(new Error('Permission denied'));
+      else mockSetString.mockResolvedValueOnce(false);
+      const root = renderStep4();
+      await failAndCopy(root, 'alert-product-skk-0');
+      if (platform === 'web') {
+        expect(root.findByProps({ testID: 'link-copy-feedback' }).props.children).toContain('belum dapat disalin');
+        expect(root.findByProps({ testID: 'link-failure-url' }).props.children).toBe(`${BASE}/paket-tuntas-pkb-skk-jenjang-8`);
+        pressByTestID(root, 'link-failure-close');
+        expect(root.findAllByProps({ testID: 'link-failure-dialog' })).toHaveLength(0);
+      } else {
+        expect(mockAlert.mock.lastCall![0]).toBe('Gagal menyalin tautan');
+        expect(mockAlert.mock.lastCall![1]).toContain(`${BASE}/paket-tuntas-pkb-skk-jenjang-8`);
+      }
+    });
+
+    it('does not copy when the link opens successfully', async () => {
+      const root = renderStep4();
+      await act(async () => {
+        await root.findByProps({ testID: 'alert-product-skk-0' }).props.onPress();
+      });
+      expect(mockSetString).not.toHaveBeenCalled();
+      expect(mockAlert).not.toHaveBeenCalled();
+      expect(root.findAllByProps({ testID: 'link-failure-dialog' })).toHaveLength(0);
+    });
+  });
+
+  it('replaces the failed web URL with the next product and clears old copy feedback', async () => {
+    Platform.OS = 'web';
+    mockOpenURL.mockRejectedValue(new Error('Link blocked'));
+    currentFormData = { ...mockFormData, skkMonthsLeft: 1 };
+    const root = renderStep4();
+    for (const index of [0, 1]) {
+      await act(async () => {
+        await root.findByProps({ testID: `alert-product-skk-${index}` }).props.onPress();
+      });
+      expect(root.findAllByProps({ testID: 'link-copy-feedback' })).toHaveLength(0);
+      await act(async () => {
+        await root.findByProps({ testID: 'link-failure-copy' }).props.onPress();
+      });
+      pressByTestID(root, 'link-failure-close');
+    }
+    expect(mockSetString.mock.calls).toEqual([
+      [`${BASE}/paket-tuntas-pkb-skk-jenjang-8`],
+      [`${BASE}/exec-summary-pkb-siap-perpanjangan-skk`],
+    ]);
   });
 });
