@@ -1,0 +1,207 @@
+Untuk melacak **siapa** yang mengubah status pesanan, Anda perlu menambahkan lapisan identitas pada setiap aksi. Karena saat ini semua admin memakai satu passcode bersama, sistem tidak bisa membedakan pelaku. Berikut adalah roadmap lengkap untuk memperbaiki ini:
+
+---
+
+### 1. Solusi Autentikasi: Dari Shared Passcode ke Identitas Individual
+
+Ada dua pendekatan, tergantung kesiapan tim:
+
+#### **Opsi A — Login Individual (Direkomendasikan untuk jangka panjang)**
+Setiap admin punya kredensial unik (email/username + password, atau SSO via Google/Supabase Auth). Saat login, sistem menerbitkan JWT/session yang mengandung `admin_id`.
+
+#### **Opsi B — "Pilih Profil" setelah Passcode (Quick Win)**
+Tetap pakai passcode bersama, tapi setelah masuk, admin **wajib memilih nama mereka** dari daftar (atau passcode dipecah jadi beberapa: `ADMIN-A`, `ADMIN-B`). Session kemudian menyimpan `admin_id` yang dipilih.
+
+> Saya akan gunakan **Opsi A** sebagai contoh karena lebih aman dan scalable, tapi prinsipnya sama untuk Opsi B.
+
+---
+
+### 2. Perubahan Skema Database
+
+Tambahkan kolom `changed_by` di tabel audit status pesanan.
+
+```sql
+-- Tabel audit yang sudah ada, tambahkan kolom baru
+ALTER TABLE order_status_history 
+ADD COLUMN changed_by UUID REFERENCES admins(id),
+ADD COLUMN changed_by_name TEXT; -- Denormalisasi untuk kecepatan query timeline
+
+-- Jika tabel belum ada, buat seperti ini:
+CREATE TABLE order_status_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL REFERENCES orders(id),
+  old_status TEXT,
+  new_status TEXT NOT NULL,
+  changed_by UUID REFERENCES admins(id),
+  changed_by_name TEXT,
+  changed_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_order_status_history_order ON order_status_history(order_id);
+```
+
+---
+
+### 3. Middleware Autentikasi (Backend)
+
+Pastikan setiap request ke endpoint admin melewati middleware yang memvalidasi token dan menyuntikkan `admin` ke `req`.
+
+```javascript
+// middleware/auth.js
+import { verifyToken } from '../utils/jwt';
+
+export function requireAdmin(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const payload = verifyToken(token);
+    req.admin = {
+      id: payload.sub,       // admin_id
+      name: payload.name,    // nama admin
+      role: payload.role,
+    };
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+```
+
+---
+
+### 4. Update Endpoint Perubahan Status
+
+Saat admin mengubah status, **paksa** pencatatan `changed_by` dari session — jangan percaya input dari client.
+
+```javascript
+// routes/orders.js
+import { requireAdmin } from '../middleware/auth';
+
+router.patch('/orders/:id/status', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { new_status } = req.body;
+  const admin = req.admin; // Dari middleware
+
+  // 1. Ambil status lama
+  const { rows: [current] } = await db.query(
+    'SELECT status FROM orders WHERE id = $1',
+    [id]
+  );
+  if (!current) return res.status(404).json({ error: 'Order not found' });
+
+  // 2. Update status pesanan
+  await db.query(
+    'UPDATE orders SET status = $1, updated_at = now() WHERE id = $2',
+    [new_status, id]
+  );
+
+  // 3. Catat ke audit trail — IDENTITAS DIAMBIL DARI SERVER, BUKAN CLIENT
+  await db.query(
+    `INSERT INTO order_status_history 
+       (order_id, old_status, new_status, changed_by, changed_by_name)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, current.status, new_status, admin.id, admin.name]
+  );
+
+  res.json({ success: true });
+});
+```
+
+> ⚠️ **Penting**: Jangan pernah menerima `changed_by` dari `req.body`. Selalu ambil dari token/session yang terverifikasi. Ini mencegah admin memalsukan identitas pelaku.
+
+---
+
+### 5. Endpoint Timeline yang Mengembalikan Identitas
+
+```javascript
+router.get('/orders/:id/timeline', requireAdmin, async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT 
+       old_status, 
+       new_status, 
+       changed_by_name,
+       changed_at
+     FROM order_status_history
+     WHERE order_id = $1
+     ORDER BY changed_at ASC`,
+    [req.params.id]
+  );
+  res.json(rows);
+});
+```
+
+---
+
+### 6. Update UI Timeline (Frontend)
+
+Tampilkan nama admin di setiap entry timeline.
+
+```jsx
+// components/OrderTimeline.jsx
+export default function OrderTimeline({ entries }) {
+  return (
+    <ul className="timeline">
+      {entries.map((entry, i) => (
+        <li key={i} className="timeline-entry">
+          <div className="status-badge">{entry.new_status}</div>
+          <div className="meta">
+            <span className="actor">
+              oleh <strong>{entry.changed_by_name ?? 'Sistem'}</strong>
+            </span>
+            <span className="time">
+              {new Date(entry.changed_at).toLocaleString('id-ID')}
+            </span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Contoh tampilan:
+```
+[Dikirim]
+oleh Budi Santoso • 22/10/2026 14:32
+
+[Selesai]
+oleh Siti Aminah • 22/10/2026 16:05
+```
+
+---
+
+### 7. Bonus: Query Audit untuk Keluhan
+
+Dengan `changed_by` tercatat, Anda kini bisa menjawab pertanyaan audit seperti:
+
+```sql
+-- Siapa saja yang pernah mengubah pesanan jadi "Dibatalkan" minggu ini?
+SELECT changed_by_name, COUNT(*) AS jumlah
+FROM order_status_history
+WHERE new_status = 'cancelled'
+  AND changed_at >= now() - interval '7 days'
+GROUP BY changed_by_name
+ORDER BY jumlah DESC;
+
+-- Riwayat lengkap satu pesanan untuk investigasi keluhan
+SELECT changed_at, old_status, new_status, changed_by_name
+FROM order_status_history
+WHERE order_id = '...'
+ORDER BY changed_at;
+```
+
+---
+
+### Ringkasan Migrasi
+
+| Langkah | Aksi |
+|---|---|
+| 1 | Tambahkan kolom `changed_by` + `changed_by_name` di tabel audit |
+| 2 | Terapkan autentikasi individual (atau minimal identifier unik per admin) |
+| 3 | Buat middleware yang menyuntikkan identitas admin ke `req` |
+| 4 | Ubah endpoint status: ambil identitas dari **server session**, bukan client |
+| 5 | Tampilkan nama pelaku di UI timeline |
+| 6 | (Opsional) Tambahkan halaman audit log untuk manajer |
+
+Dengan begini, setiap perubahan status punya **siapa, apa, kapan** — fondasi audit trail yang solid untuk investigasi keluhan ke depan.
