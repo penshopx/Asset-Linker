@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { applyMigrations } from "./lib/migrate";
 import { startBuyerEmailRetryJob } from "./lib/buyer-email-retry";
 import { validateEmailStartup } from "./lib/email-readiness";
+import { startProofCleanupJob } from "./lib/proof-cleanup";
 
 const rawPort = process.env["PORT"];
 
@@ -32,4 +33,5 @@ app.listen(port, (err) => {
     logger.error({ err }, "[migrate] Unexpected migration runner failure (non-fatal)");
   });
   startBuyerEmailRetryJob();
+  startProofCleanupJob();
 });

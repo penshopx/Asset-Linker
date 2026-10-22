@@ -16,6 +16,9 @@ _Replace the heading above with the project's name, and this line with one sente
     - Production sets it to the deployment's primary URL
   - `RESEND_API_KEY` — Resend API key required to send email
   - `ADMIN_EMAIL` — recipient address for admin notifications
+  - `SUPABASE_SERVICE_ROLE_KEY` — server-only Supabase credential required for proof cleanup and startup migrations. Never use a `VITE_`/`EXPO_PUBLIC_` prefix or expose it in client code.
+
+Proof uploads return 503 before any bytes are stored if the server-only credential or cleanup reservation is unavailable. Cleanup polls every minute, retries failed removals after a five-minute lease without a retry cap, and recovers abandoned upload reservations after one hour. Apply `artifacts/api-server/migration.sql` when bootstrapping the Supabase project; cleanup RPCs and the migration helper must be executable only by `service_role`, not public/anonymous clients.
 
 `SITE_URL` must be an absolute `http://` or `https://` app base URL with a hostname, without credentials, query parameters, or fragments. When email is enabled, startup validates it and logs the environment and required format, never the supplied URL. Invalid configuration prevents status-update emails without stopping the API.
 

@@ -1,14 +1,16 @@
 /**
  * Lightweight startup migration runner.
  *
- * Supabase's JS client (anon key) cannot execute DDL directly.  Instead we
- * call a Postgres function `run_migration(sql text)` that must be created
+ * Supabase's JS client cannot execute DDL directly. Instead the server-only
+ * service-role client calls a protected helper. Never expose this to anon.
+ * The Postgres function `run_migration(sql text)` must be created
  * once in the Supabase SQL editor (see migration.sql).  If the function is
  * absent the server still boots and logs a clear warning.
  */
 
-import { supabase } from "./supabase";
+import { getProofCleanupClient } from "./proof-cleanup-client";
 import { logger } from "./logger";
+import { PROOF_CLEANUP_SQL } from "./proof-cleanup-migration";
 
 /**
  * SQL that must be applied to the database exactly once.
@@ -262,8 +264,8 @@ export async function applyMigrations(): Promise<void> {
     let error: unknown;
     let status = 0;
     try {
-      const response = await supabase
-        .rpc("run_migration", { sql: MIGRATION_SQL })
+      const response = await getProofCleanupClient()
+        .rpc("run_migration", { sql: MIGRATION_SQL + PROOF_CLEANUP_SQL })
         .abortSignal(AbortSignal.timeout(MIGRATION_TIMEOUT_MS));
       error = response.error;
       status = response.status;
@@ -279,7 +281,7 @@ export async function applyMigrations(): Promise<void> {
     const info = errorInfo(error);
     if (info.code === "PGRST202") {
       logger.warn(
-        { attempt, code: info.code, sql: MIGRATION_SQL.trim() },
+        { attempt, code: info.code, sql: (MIGRATION_SQL + PROOF_CLEANUP_SQL).trim() },
         "[migrate] Migration helper missing; run this SQL in the Supabase SQL editor (not retried)",
       );
       return;

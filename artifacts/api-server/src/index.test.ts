@@ -9,6 +9,7 @@ const { listen, migrate, retry, log } = vi.hoisted(() => ({
 vi.mock("./app", () => ({ default: { listen } }));
 vi.mock("./lib/migrate", () => ({ applyMigrations: migrate }));
 vi.mock("./lib/buyer-email-retry", () => ({ startBuyerEmailRetryJob: retry }));
+vi.mock("./lib/proof-cleanup", () => ({ startProofCleanupJob: vi.fn() }));
 vi.mock("./lib/logger", () => ({ logger: log }));
 
 afterEach(() => {

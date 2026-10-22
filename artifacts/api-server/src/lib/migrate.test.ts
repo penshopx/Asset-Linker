@@ -5,7 +5,7 @@ const { rpc, abortSignal, log } = vi.hoisted(() => ({
   abortSignal: vi.fn(),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock("./supabase", () => ({ supabase: { rpc } }));
+vi.mock("./proof-cleanup-client", () => ({ getProofCleanupClient: () => ({ rpc }) }));
 vi.mock("./logger", () => ({ logger: log }));
 
 import {

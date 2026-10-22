@@ -5,3 +5,4 @@
 - [Workspace dependency linking](workspace-dependency-linking.md) — manifest dan lockfile bisa benar sementara symlink paket workspace tertinggal; pulihkan tanpa mengubah versi.
 - [Fokus dan navigasi LKUT](lkut-product-rules.md) — LKUT yang diangkat dalam materi promosi; tautan banner PUB mobile wajib dibuka dalam aplikasi.
 - [Identitas audit admin](admin-audit-identity.md) — passcode bersama hanya mendukung nama yang diisi sendiri, bukan identitas akun terverifikasi.
+- [Keamanan pembersihan bukti](proof-cleanup-safety.md) — simpan reservasi sebelum unggah dan pertahankan penanda penghapusan untuk menolak referensi pesanan yang terlambat.

@@ -15,6 +15,7 @@ import {
 } from "../lib/buyer-email-retry";
 import type { OrderEmailData } from "../lib/mailer";
 import { decryptAdminActor, encryptAdminActor, withoutActorEnvelope } from "../lib/admin-actor";
+import { cleanupUploadedProof, registerProofUpload } from "../lib/proof-cleanup";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -38,27 +39,6 @@ function isMissingStatusHistoryTableError(error: unknown): boolean {
       (dbError.message.includes("does not exist") ||
         dbError.message.includes("schema cache")))
   );
-}
-
-async function cleanupUploadedProof(filename: string | null): Promise<void> {
-  if (!filename) {
-    return;
-  }
-
-  try {
-    const { error } = await supabase.storage.from("proofs").remove([filename]);
-    if (error) {
-      console.error("[orders] Failed to clean up uploaded proof", {
-        filename,
-        error: error.message,
-      });
-    }
-  } catch (error: unknown) {
-    console.error("[orders] Storage cleanup exception", {
-      filename,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 }
 
 // ─── Auth middleware for admin routes ────────────────────────────────────────
@@ -124,6 +104,15 @@ router.post(
       const ext = req.file.originalname.split(".").pop() ?? "bin";
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       buktFilename = filename;
+
+      try {
+        await registerProofUpload(filename);
+      } catch (error) {
+        req.log.error({ err: error }, "Cannot reserve persistent proof cleanup; upload cancelled");
+        rejectInflight(error);
+        if (idempotencyKey) inflightMap.delete(idempotencyKey);
+        return res.status(503).json({ error: "Gagal menyiapkan unggahan bukti. Coba lagi." });
+      }
 
       try {
         const { error: uploadError } = await supabase.storage

@@ -27,6 +27,7 @@ import { decryptAdminActor, encryptAdminActor } from '../lib/admin-actor';
 
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 const mockRpc = vi.fn();
+const mockProofRpc = vi.fn();
 const mockFrom = vi.fn();
 const mockStorageFrom = vi.fn();
 const mockStorageUpload = vi.fn();
@@ -35,10 +36,17 @@ const mockGetPublicUrl = vi.fn();
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
-    rpc: mockRpc,
+    rpc: (name: string, ...args: unknown[]) =>
+      name === 'create_order_idempotent' ? mockRpc(name, ...args) : mockProofRpc(name, ...args),
     from: mockFrom,
     storage: { from: mockStorageFrom },
   },
+}));
+vi.mock('../lib/proof-cleanup-client', () => ({
+  getProofCleanupClient: () => ({
+    rpc: mockProofRpc,
+    storage: { from: mockStorageFrom },
+  }),
 }));
 
 // ── Mailer mock ───────────────────────────────────────────────────────────────
@@ -78,6 +86,9 @@ const FAKE_HISTORY = [
 
 beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', 'audit-test-key-only');
+  mockProofRpc.mockImplementation((name: string) => ({
+    abortSignal: () => Promise.resolve({ data: name === 'claim_proof_cleanup', error: null }),
+  }));
   mockStorageUpload.mockResolvedValue({ error: null });
   mockStorageRemove.mockResolvedValue({ error: null });
   mockGetPublicUrl.mockReturnValue({ data: { publicUrl: null } });
@@ -725,11 +736,43 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
 
       expect(res.status).toBe(500);
       expect(mockStorageUpload).toHaveBeenCalledTimes(1);
+      expect(mockProofRpc).toHaveBeenCalledWith('register_proof_upload', {
+        p_filename: expect.stringMatching(/^1725000000000-[a-z0-9]+\.pdf$/),
+      });
+      expect(mockProofRpc.mock.invocationCallOrder[0]).toBeLessThan(
+        mockStorageUpload.mock.invocationCallOrder[0]!,
+      );
       expect(mockStorageRemove).toHaveBeenCalledWith([
         expect.stringMatching(/^1725000000000-[a-z0-9]+\.pdf$/),
       ]);
     } finally {
       vi.restoreAllMocks();
     }
+  });
+
+  it('does not upload or create an order when durable cleanup cannot be registered', async () => {
+    mockProofRpc.mockReturnValue({
+      abortSignal: () => Promise.resolve({ error: { message: 'DB down' } }),
+    });
+    const res = await request(app).post('/api/konfirmasi-pesanan')
+      .field('nama_perusahaan', 'PT Test').field('nama_pic', 'Budi')
+      .field('email', 'budi@test.com').field('whatsapp', '08123456789')
+      .field('produk', 'Layanan A')
+      .attach('bukti_pembayaran', Buffer.from('proof'), 'proof.pdf');
+    expect(res.status).toBe(503);
+    expect(mockStorageUpload).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('cleans its own unused upload when another order won the idempotency key', async () => {
+    mockRpc.mockResolvedValue(rpcDuplicate());
+    const res = await request(app).post('/api/konfirmasi-pesanan')
+      .field('nama_perusahaan', 'PT Test').field('nama_pic', 'Budi')
+      .field('email', 'budi@test.com').field('whatsapp', '08123456789')
+      .field('produk', 'Layanan A')
+      .attach('bukti_pembayaran', Buffer.from('proof'), 'proof.pdf');
+    expect(res.status).toBe(200);
+    expect(res.body.duplicate).toBe(true);
+    expect(mockStorageRemove).toHaveBeenCalledWith([mockStorageUpload.mock.calls[0]![0]]);
   });
 });
