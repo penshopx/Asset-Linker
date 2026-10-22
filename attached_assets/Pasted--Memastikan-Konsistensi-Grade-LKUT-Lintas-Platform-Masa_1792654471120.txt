@@ -1,0 +1,242 @@
+# Memastikan Konsistensi Grade LKUT Lintas Platform
+
+Masalah ini adalah kasus klasik **divergensi implementasi**: dua kode yang seharusnya identik perlahan-lahan berbeda karena perubahan yang tidak terkoordinasi. Solusinya ada di dua lapisan — **arsitektur** (mencegah drift) dan **testing** (menangkap drift).
+
+---
+
+## 1. Pendekatan Arsitektur: Single Source of Truth (SSOT)
+
+Cara paling andal mencegah drift adalah **menghilangkan duplikasi logika**. Pilih salah satu:
+
+### Opsi A — Shared Package (Recommended)
+Buat modul perhitungan grade sebagai package terpisah yang dikonsumsi kedua platform.
+
+```
+packages/
+└── lkut-grading/          ← shared package
+    ├── src/
+    │   ├── index.ts
+    │   ├── formula.ts     ← rumus & bobot
+    │   ├── thresholds.ts  ← ambang batas grade
+    │   └── types.ts
+    └── package.json
+apps/
+├── web-simulator/         ← import dari lkut-grading
+└── mobile-app/            ← import dari lkut-grading
+```
+
+```typescript
+// packages/lkut-grading/src/index.ts
+export interface LKUTInput {
+  revenue: number;
+  assets: number;
+  employees: number;
+  profitMargin: number;
+}
+
+export interface LKUTResult {
+  grade: 'A' | 'B' | 'C' | 'D';
+  score: number;
+  breakdown: { metric: string; score: number; weight: number }[];
+}
+
+const WEIGHTS = {
+  revenue: 0.35,
+  assets: 0.25,
+  employees: 0.20,
+  profitMargin: 0.20,
+};
+
+const THRESHOLDS = [
+  { min: 80, grade: 'A' as const },
+  { min: 60, grade: 'B' as const },
+  { min: 40, grade: 'C' as const },
+  { min: 0,  grade: 'D' as const },
+];
+
+function scoreMetric(value: number, scale: [number, number]): number {
+  const [min, max] = scale;
+  if (value <= min) return 0;
+  if (value >= max) return 100;
+  return ((value - min) / (max - min)) * 100;
+}
+
+export function computeLKUTGrade(input: LKUTInput): LKUTResult {
+  const breakdown = [
+    { metric: 'revenue',      score: scoreMetric(input.revenue, [0, 10_000_000_000]), weight: WEIGHTS.revenue },
+    { metric: 'assets',       score: scoreMetric(input.assets, [0, 5_000_000_000]),   weight: WEIGHTS.assets },
+    { metric: 'employees',   score: scoreMetric(input.employees, [0, 200]),          weight: WEIGHTS.employees },
+    { metric: 'profitMargin', score: scoreMetric(input.profitMargin, [0, 30]),        weight: WEIGHTS.profitMargin },
+  ];
+
+  const totalScore = breakdown.reduce((sum, b) => sum + b.score * b.weight, 0);
+  const grade = THRESHOLDS.find(t => totalScore >= t.min)!.grade;
+
+  return { grade, score: totalScore, breakdown };
+}
+```
+
+Kedua platform cukup:
+```typescript
+import { computeLKUTGrade } from '@company/lkut-grading';
+const result = computeLKUTGrade(formData);
+```
+
+### Opsi B — Backend API
+Jika shared package tidak feasible (misal mobile native, bukan React Native), pindahkan logika ke endpoint backend. Kedua client memanggil API yang sama.
+
+---
+
+## 2. Regression Test Lintas Implementasi
+
+Jika SSOT tidak bisa langsung diterapkan (misal, mobile masih pakai implementasi lama), buat **test yang membandingkan output kedua implementasi secara langsung**.
+
+### Struktur Test Fixture
+
+Buat kumpulan data perusahaan yang mencakup kasus tepi (edge cases):
+
+```typescript
+// tests/fixtures/lkut-cases.ts
+import { LKUTInput } from '@company/lkut-grading';
+
+export const LKUT_TEST_CASES: Array<{ name: string; input: LKUTInput }> = [
+  {
+    name: 'UMKM kecil — harusnya D',
+    input: { revenue: 100_000_000, assets: 50_000_000, employees: 3, profitMargin: 2 },
+  },
+  {
+    name: 'Menengah bawah — di ambang C/D',
+    input: { revenue: 1_500_000_000, assets: 800_000_000, employees: 25, profitMargin: 8 },
+  },
+  {
+    name: 'Tepat di ambang B/C (60.0)',
+    input: { revenue: 3_200_000_000, assets: 1_800_000_000, employees: 60, profitMargin: 12 },
+  },
+  {
+    name: 'Tepat di ambang A/B (80.0)',
+    input: { revenue: 7_500_000_000, assets: 3_900_000_000, employees: 150, profitMargin: 22 },
+  },
+  {
+    name: 'Perusahaan besar — harusnya A',
+    input: { revenue: 9_500_000_000, assets: 4_800_000_000, employees: 190, profitMargin: 28 },
+  },
+  {
+    name: 'Edge: revenue tinggi tapi margin negatif',
+    input: { revenue: 8_000_000_000, assets: 4_000_000_000, employees: 180, profitMargin: -5 },
+  },
+  {
+    name: 'Edge: semua nol',
+    input: { revenue: 0, assets: 0, employees: 0, profitMargin: 0 },
+  },
+];
+```
+
+### Test Lintas Implementasi
+
+```typescript
+// tests/lkut-consistency.test.ts
+import { computeLKUTGrade as webGrade } from '../apps/web-simulator/src/grading';
+import { computeLKUTGrade as mobileGrade } from '../apps/mobile/src/grading';
+import { LKUT_TEST_CASES } from './fixtures/lkut-cases';
+
+describe('LKUT Grade Consistency — Web vs Mobile', () => {
+  it.each(LKUT_TEST_CASES)(
+    'produces identical grade for: $name',
+    ({ input }) => {
+      const web = webGrade(input);
+      const mobile = mobileGrade(input);
+
+      // Grade harus sama persis
+      expect(mobile.grade).toBe(web.grade);
+
+      // Score boleh berbeda sedikit karena floating-point, tapi tidak lebih dari 0.01
+      expect(Math.abs(mobile.score - web.score)).toBeLessThan(0.01);
+    }
+  );
+
+  it('matches documented thresholds at exact boundary values', () => {
+    // Kasus paling berbahaya: drift di ambang batas
+    const boundaryInputs = [
+      { score: 59.99, expectedGrade: 'D' },
+      { score: 60.0,  expectedGrade: 'C' },
+      { score: 79.99, expectedGrade: 'C' },
+      { score: 80.0,  expectedGrade: 'B' },
+    ];
+
+    for (const { expectedGrade } of boundaryInputs) {
+      // Verifikasi kedua implementasi setuju di ambang
+      // (butuh helper untuk inject score langsung — opsional)
+    }
+  });
+});
+```
+
+---
+
+## 3. Menangkap Drift Lebih Dini
+
+Tambahkan mekanisme pendeteksi drift di CI:
+
+### a. Snapshot Test untuk Grade
+```typescript
+// tests/lkut-snapshots.test.ts
+import { computeLKUTGrade } from '@company/lkut-grading';
+import { LKUT_TEST_CASES } from './fixtures/lkut-cases';
+
+it('matches approved grade snapshots', () => {
+  const results = LKUT_TEST_CASES.map(c => ({
+    name: c.name,
+    grade: computeLKUTGrade(c.input).grade,
+  }));
+  expect(results).toMatchSnapshot();
+});
+```
+
+Snapshot ini akan **gagal** jika ada perubahan formula/ambang — memaksa reviewer untuk sadar bahwa mereka mengubah hasil grading.
+
+### b. Contract Test untuk API (jika pakai backend)
+```typescript
+// Menggunakan Pact atau sejenisnya
+it('mobile app and web simulator agree on the grading contract', () => {
+  // Pact consumer test memastikan kedua client berekspektasi sama
+});
+```
+
+### c. CI Check: Build Kedua Platform dari Shared Module
+```yaml
+# .github/workflows/grading-consistency.yml
+name: LKUT Grading Consistency
+on: [pull_request]
+jobs:
+  consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test -- --testPathPattern=lkut-consistency
+```
+
+---
+
+## 4. Checklist Implementasi
+
+| Langkah | Tujuan |
+|---|---|
+| [ ] Ekstrak logika grade ke shared package / backend | Hapus duplikasi kode |
+| [ ] Buat fixture data perusahaan (termasuk edge cases & ambang batas) | Basis test yang representatif |
+| [ ] Tulis test lintas implementasi yang membandingkan output | Tangkap drift |
+| [ ] Tambahkan snapshot test untuk grade | Cegah perubahan tak sengaja |
+| [ ] Jalankan test di CI pada setiap PR | Gate otomatis |
+| [ ] Dokumentasikan formula, bobot, dan ambang batas di satu tempat | Single reference |
+
+---
+
+## 5. Catatan untuk Review Lampiran Migrasi
+
+Saat Anda meninjau lampiran migrasi data formulir lama, perhatikan tiga hal ini:
+
+1. **Apakah data lama punya field yang dibutuhkan formula baru?** Jika ada field baru (misal `profitMargin`) yang tidak ada di data lama, pastikan migrasi memberikan default yang masuk akal — bukan `0` jika `0` akan menghasilkan grade D.
+2. **Apakah migrasi mengubah nilai existing?** Jika iya, jalankan fixture test di atas terhadap data hasil migrasi untuk memastikan grade tidak berubah drastis tanpa alasan.
+3. **Apakah ada data yang harus di-regrade?** Jika formula berubah, pengguna dengan data lama mungkin perlu melihat grade baru mereka — ini keputusan produk, bukan teknis.
+
+Dengan SSOT + cross-implementation test + snapshot, drift grade LKUT akan terdeteksi di CI sebelum sampai ke pengguna — bukan dari keluhan setelah rilis.
