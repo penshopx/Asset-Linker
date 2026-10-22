@@ -105,7 +105,9 @@ describe('FormProvider persisted data migration guard', () => {
   it('migrates legacy unversioned data and writes the current envelope', async () => {
     const savedValues: Partial<LkutFormData> = {
       kualifikasi: 'Utama',
+      assetGrowth: 0,
       projectScore: 88,
+      hasSmap: false,
     };
     storage.set(STORAGE_KEY, JSON.stringify(savedValues));
 
@@ -113,10 +115,27 @@ describe('FormProvider persisted data migration guard', () => {
 
     const expectedData = { ...DEFAULT_FORM, ...savedValues };
     expect(currentData(renderer)).toEqual(expectedData);
+    expect(currentData(renderer).gpm).toBe(DEFAULT_FORM.gpm);
+    expect(currentData(renderer).skkMonthsLeft).toBe(DEFAULT_FORM.skkMonthsLeft);
+    expect(mockAsyncStorage.setItem).toHaveBeenCalledTimes(1);
     expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
       STORAGE_KEY,
       JSON.stringify({ version: STORAGE_VERSION, data: expectedData }),
     );
+    expect(JSON.parse(storage.get(STORAGE_KEY)!)).toEqual({
+      version: STORAGE_VERSION,
+      data: expectedData,
+    });
+
+    await act(async () => renderer.unmount());
+    mockAsyncStorage.setItem.mockClear();
+
+    const restoredRenderer = await renderForm();
+
+    expect(currentData(restoredRenderer)).toEqual(expectedData);
+    expect(mockAsyncStorage.setItem).not.toHaveBeenCalled();
+
+    await act(async () => restoredRenderer.unmount());
   });
 
   it('falls back to defaults when persisted storage is not valid JSON', async () => {
