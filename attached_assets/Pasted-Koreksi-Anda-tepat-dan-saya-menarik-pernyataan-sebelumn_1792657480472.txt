@@ -1,0 +1,34 @@
+Koreksi Anda tepat, dan saya menarik pernyataan sebelumnya. Contoh itu memang keliru secara prinsip, bukan sekadar salah angka.
+
+## Koreksi Utama: Toleransi Tidak Boleh Mengaburkan Ambang
+
+Pernyataan saya bahwa 79,99999 dan 80,00001 "harus menghasilkan grade yang sama" adalah **kesalahan konseptual**. Aturan yang benar:
+
+- **79,99999 → AA** (di bawah ambang 80)
+- **80,00001 → AAA** (di atas ambang 80)
+
+Keduanya memang harus berbeda grade karena berada di sisi berlawanan dari ambang. Toleransi numerik hanya berlaku untuk membandingkan **skor terhadap hasil acuan** (misal: implementasi menghasilkan 79,9999999 sementara acuan 80,0000000 — keduanya dianggap sama sebagai skor), **bukan** untuk menggeser pemetaan skor ke grade.
+
+Implikasi praktisnya:
+- Assertion skor: `expect(actual).toBeCloseTo(expected, precision)` — presisi desimal yang disepakati.
+- Assertion grade: `expect(actual.grade).toBe(expected.grade)` — eksak, tanpa toleransi.
+- Jika skor aktual dan acuan sama-sama "di sekitar 80" tapi di sisi berbeda dari ambang, grade harus berbeda — dan ini bukan bug, ini perilaku yang benar.
+
+## Pencatatan Penajaman Lainnya
+
+**Idempotensi semantik:** Bandingkan seluruh data yang bermakna, bukan hanya subset field kunci. Metadata audit (termasuk `migrated_at`) dilindungi — hanya boleh diabaikan dalam perbandingan jika secara eksplisit ditetapkan tidak memengaruhi makna atau kebutuhan audit. Ini mencegah "idempotensi palsu" di mana field penting berubah tapi tidak terdeteksi karena hanya field tertentu yang dicek.
+
+**`toBeCloseTo()` dan presisi:** Parameter kedua adalah jumlah digit desimal presisi, bukan nilai toleransi absolut. Assertion harus dirumuskan sesuai batas toleransi yang disepakati, bukan asal pakai angka default.
+
+**Grade dari data parsial:** Ini bukan perilaku otomatis yang boleh diterapkan begitu saja — ini pilihan kebijakan produk yang perlu keputusan eksplisit. Jika field wajib tidak tersedia, default bukan "isi dengan angka netral supaya tetap menghasilkan grade", melainkan "tandai sebagai belum lengkap dan jangan hasilkan grade" sampai kebijakan produk memutuskan lain.
+
+**Backup vs migrasi balik:** Keduanya tidak saling menggantikan. Informasi yang sudah dihapus hanya dapat dipulihkan dari backup — migrasi balik tidak bisa menciptakan data yang sudah tidak ada. Perencanaan pemulihan untuk migrasi destruktif harus memperhitungkan batasan ini secara eksplisit.
+
+## Status
+
+- Lampiran pertama dipakai sebagai dasar tinjauan.
+- Koreksi contoh ambang dari lampiran kedua diterapkan pada prinsip toleransi.
+- Tidak ada perubahan kode, tugas, atau pengujian yang dijalankan.
+- Pekerjaan konsistensi lintas platform tetap pada jalurnya yang sudah digabung — saya tidak membuat duplikasi.
+
+Prinsip toleransi yang benar sekarang tercatat: **toleransi untuk skor, eksak untuk grade, dan ambang tidak boleh digeser oleh pertimbangan numerik apa pun.**
