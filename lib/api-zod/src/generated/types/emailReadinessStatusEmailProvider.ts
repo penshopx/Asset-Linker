@@ -6,6 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Process-local send evidence; not a live probe. Message/recipient rejection
+ * leaves this state unchanged. Temporary failures expire after 60 seconds
+ * to unchecked; configuration failures require a successful real send or
+ * process restart. Unchecked is ready but does not assert provider recovery.
+ */
 export type EmailReadinessStatusEmailProvider = typeof EmailReadinessStatusEmailProvider[keyof typeof EmailReadinessStatusEmailProvider];
 
 

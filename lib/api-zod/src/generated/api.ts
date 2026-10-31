@@ -70,12 +70,19 @@ export const HealthCheckResponse = zod.object({
  * Returns 503 until startup migrations succeed, including while retrying or
  * after any terminal failure. Database status reports only the startup migration
  * outcome, not a live connectivity probe. No SQL or error details are exposed.
- * Email is optional when disabled. Invalid SITE_URL or a failed last send
+ * Email is optional when disabled. Invalid SITE_URL or unavailable email provider
  * also returns 503 even after migrations succeed.
- * Provider state reflects this process only: unchecked means no send attempted,
- * available means the last send succeeded, unavailable means the last send
- * failed (including provider rejection), not necessarily a provider-wide outage.
- * No active probe or test email is sent. /healthz remains liveness-only.
+ * Provider state is process-local evidence, not a live availability guarantee.
+ * Recipient/payload validation and message-specific idempotency rejections do not
+ * change it or clear an existing failure. Successful real sends set available.
+ * Authentication, access, sender/region configuration, and quota failures set
+ * unavailable until a real send succeeds (or the process restarts as unchecked).
+ * Network errors, rate limits, provider 5xx errors, unknown failures, and malformed
+ * responses set unavailable for 60 seconds from the latest temporary failure,
+ * then unchecked, not available. Temporary errors never clear a known configuration
+ * failure. Unchecked means no definitive current evidence, including after cooldown.
+ * Readiness does not block real sends. No active probe, retry, or test email is
+ * triggered by readiness or cooldown. /healthz remains liveness-only.
  * @summary Startup migration and email readiness
  */
 export const EmailReadinessResponse = zod.object({
@@ -86,7 +93,7 @@ export const EmailReadinessResponse = zod.object({
   "email": zod.object({
   "enabled": zod.boolean(),
   "links": zod.enum(['valid', 'invalid', 'not_required']),
-  "provider": zod.enum(['not_configured', 'unchecked', 'available', 'unavailable'])
+  "provider": zod.enum(['not_configured', 'unchecked', 'available', 'unavailable']).describe('Process-local send evidence; not a live probe. Message\/recipient rejection\nleaves this state unchanged. Temporary failures expire after 60 seconds\nto unchecked; configuration failures require a successful real send or\nprocess restart. Unchecked is ready but does not assert provider recovery.\n')
 })
 })
 

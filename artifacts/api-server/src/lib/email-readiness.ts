@@ -26,11 +26,23 @@ export function validateSiteUrl(value = process.env["SITE_URL"]): string {
   return parsed.href.replace(/\/+$/, "");
 }
 
-// This is the last send outcome in this process, not an active provider probe.
-let lastSend: "unchecked" | "available" | "unavailable" = "unchecked";
+export const EMAIL_FAILURE_COOLDOWN_MS = 60_000;
+export type EmailSendOutcome =
+  | "success" | "message_rejected" | "configuration_error" | "temporary_failure";
 
-export function recordEmailSend(success: boolean): void {
-  lastSend = success ? "available" : "unavailable";
+// Process-local evidence only, never an active probe or a gate on real sends.
+let providerState: "unchecked" | "available" | "unavailable" = "unchecked";
+let retryAfter: number | null = null;
+
+export function recordEmailSend(outcome: EmailSendOutcome): void {
+  // A bad recipient/payload neither establishes availability nor clears an outage.
+  if (outcome === "message_rejected") return;
+  // Temporary errors cannot erase a known configuration failure.
+  if (outcome === "temporary_failure" &&
+    providerState === "unavailable" && retryAfter === null) return;
+  providerState = outcome === "success" ? "available" : "unavailable";
+  retryAfter = outcome === "temporary_failure"
+    ? Date.now() + EMAIL_FAILURE_COOLDOWN_MS : null;
 }
 
 export function getEmailReadiness() {
@@ -44,7 +56,11 @@ export function getEmailReadiness() {
       links = "invalid";
     }
   }
-  const provider = enabled ? lastSend : "not_configured";
+  if (retryAfter !== null && Date.now() >= retryAfter) {
+    providerState = "unchecked";
+    retryAfter = null;
+  }
+  const provider = enabled ? providerState : "not_configured";
   return {
     status: links === "invalid" || provider === "unavailable" ? "not_ready" : "ready",
     email: { enabled, links, provider },

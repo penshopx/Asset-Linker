@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { recordEmailSend, validateSiteUrl } from "./email-readiness";
+import { recordEmailSend, validateSiteUrl, type EmailSendOutcome } from "./email-readiness";
 import { logger } from "./logger";
 
 let resend: Resend | null = null;
@@ -52,7 +52,30 @@ function getSiteUrl(): string {
   }
 }
 
-/** Send and throw if Resend returns an error result (not just a rejected promise). */
+/** Classify structured SDK errors, never human-readable messages or recipient data. */
+function classifySendError(error: unknown): EmailSendOutcome {
+  if (!error || typeof error !== "object") return "temporary_failure";
+  const { name, statusCode } = error as { name?: unknown; statusCode?: unknown };
+  if (
+    statusCode === 401 || statusCode === 403 ||
+    ["missing_api_key", "invalid_api_key", "restricted_api_key", "invalid_access",
+      "security_error", "invalid_from_address", "invalid_region",
+      "monthly_quota_exceeded", "daily_quota_exceeded"].includes(String(name))
+  ) return "configuration_error";
+  if (
+    statusCode === 429 || (typeof statusCode === "number" && statusCode >= 500) ||
+    ["rate_limit_exceeded", "application_error", "internal_server_error"].includes(String(name))
+  ) return "temporary_failure";
+  if (
+    ["validation_error", "invalid_parameter", "missing_required_field",
+      "invalid_attachment", "invalid_idempotency_key", "invalid_idempotent_request",
+      "concurrent_idempotent_requests"].includes(String(name))
+  ) return "message_rejected";
+  // Includes rejected promises, malformed responses, and unknown future error codes.
+  return "temporary_failure";
+}
+
+/** Send and preserve structured Resend error metadata for readiness classification. */
 async function sendOrThrow(
   payload: Parameters<Resend["emails"]["send"]>[0],
   options?: Parameters<Resend["emails"]["send"]>[1],
@@ -60,14 +83,17 @@ async function sendOrThrow(
   try {
     const { data, error } = await resend!.emails.send(payload, options);
     if (error) {
-      throw new Error(`Resend error: ${error.message ?? JSON.stringify(error)}`);
+      throw Object.assign(new Error(`Resend error: ${error.message}`), {
+        name: error.name,
+        statusCode: error.statusCode,
+      });
     }
     if (!data?.id) {
       throw new Error("Resend returned no email ID and no error — unexpected response");
     }
-    recordEmailSend(true);
+    recordEmailSend("success");
   } catch (err) {
-    recordEmailSend(false);
+    recordEmailSend(classifySendError(err));
     throw err;
   }
 }

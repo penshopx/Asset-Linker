@@ -14,9 +14,9 @@ vi.mock("resend", () => ({
 
 process.env["RESEND_API_KEY"] = "test-resend-key";
 
-const { sendStatusUpdate } = await import("./mailer");
-const { logger } = await import("./logger");
-const { getEmailReadiness } = await import("./email-readiness");
+let sendStatusUpdate: typeof import("./mailer").sendStatusUpdate;
+let logger: typeof import("./logger").logger;
+let getEmailReadiness: typeof import("./email-readiness").getEmailReadiness;
 
 const statusEmail = {
   orderId: "order/123",
@@ -30,7 +30,12 @@ const statusEmail = {
 describe("sendStatusUpdate", () => {
   const originalSiteUrl = process.env["SITE_URL"];
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ sendStatusUpdate } = await import("./mailer"));
+    ({ logger } = await import("./logger"));
+    ({ getEmailReadiness } = await import("./email-readiness"));
+    process.env["SITE_URL"] = "https://preview.example.test";
     mockSend.mockClear();
     mockSend.mockResolvedValue({
       data: { id: "email-1" },
@@ -39,6 +44,7 @@ describe("sendStatusUpdate", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     if (originalSiteUrl === undefined) {
       delete process.env["SITE_URL"];
@@ -109,4 +115,91 @@ describe("sendStatusUpdate", () => {
       });
     },
   );
+  it.each([
+    "validation_error", "invalid_parameter", "missing_required_field",
+    "invalid_attachment", "invalid_idempotency_key", "invalid_idempotent_request",
+    "concurrent_idempotent_requests",
+  ])("does not treat structured %s as a provider outage", async (name) => {
+    const reject = () => mockSend.mockResolvedValueOnce({
+      data: null, error: { name, statusCode: 422, message: "Message rejected" },
+    });
+    reject();
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow("Message rejected");
+    expect(getEmailReadiness()).toMatchObject({
+      status: "ready", email: { provider: "unchecked" },
+    });
+    await sendStatusUpdate(statusEmail);
+    reject();
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow();
+    expect(getEmailReadiness().email.provider).toBe("available");
+
+    mockSend.mockRejectedValueOnce(new Error("offline"));
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow();
+    reject();
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow();
+    expect(getEmailReadiness().email.provider).toBe("unavailable");
+  });
+
+  it.each([
+    ["invalid_api_key", 401], ["missing_api_key", 401],
+    ["restricted_api_key", 403], ["invalid_access", 403],
+    ["security_error", 403], ["invalid_from_address", 422],
+    ["invalid_region", 422], ["monthly_quota_exceeded", 429],
+    ["daily_quota_exceeded", 429], ["validation_error", 403],
+  ])("keeps %s unavailable beyond cooldown until a real send succeeds", async (name, statusCode) => {
+    vi.useFakeTimers();
+    mockSend.mockResolvedValueOnce({
+      data: null, error: { name, statusCode, message: "Configuration rejected" },
+    });
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow();
+    expect(getEmailReadiness().email.provider).toBe("unavailable");
+    // A subsequent temporary failure cannot downgrade the known configuration problem.
+    mockSend.mockRejectedValueOnce(new Error("offline"));
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getEmailReadiness()).toMatchObject({ status: "not_ready" });
+    expect(mockSend).toHaveBeenCalledTimes(2);
+    await sendStatusUpdate(statusEmail);
+    expect(getEmailReadiness()).toMatchObject({
+      status: "ready", email: { provider: "available" },
+    });
+  });
+
+  it.each([
+    ["rate_limit_exceeded", 429], ["internal_server_error", 500],
+    ["application_error", null], ["new_provider_error", 503],
+    ["new_provider_error", 400], ["validation_error", 500],
+    ["validation_error", 429],
+  ])("expires temporary %s (%s) to unchecked without sending a probe", async (name, statusCode) => {
+    vi.useFakeTimers();
+    mockSend.mockResolvedValueOnce({
+      data: null, error: { name, statusCode, message: "Temporary failure" },
+    });
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(getEmailReadiness()).toMatchObject({
+      status: "not_ready", email: { provider: "unavailable" },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getEmailReadiness()).toMatchObject({
+      status: "ready", email: { provider: "unchecked" },
+    });
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    await sendStatusUpdate(statusEmail);
+    expect(getEmailReadiness().email.provider).toBe("available");
+  });
+
+  it("refreshes the cooldown on a new network failure, without scheduling email", async () => {
+    vi.useFakeTimers();
+    mockSend.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow("fetch failed");
+    await vi.advanceTimersByTimeAsync(30_000);
+    mockSend.mockRejectedValueOnce(new Error("socket closed"));
+    await expect(sendStatusUpdate(statusEmail)).rejects.toThrow("socket closed");
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(getEmailReadiness().email.provider).toBe("unavailable");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getEmailReadiness().email.provider).toBe("unchecked");
+    expect(mockSend).toHaveBeenCalledTimes(2);
+  });
 });

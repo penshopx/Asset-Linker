@@ -14,6 +14,7 @@ vi.mock("./proof-cleanup-client", () => ({
 import { logger } from "./logger";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
@@ -90,7 +91,7 @@ describe("email startup configuration", () => {
   });
 });
 
-it("keeps liveness healthy and distinguishes configuration from last-send failures", async () => {
+it("keeps liveness healthy and exposes temporary recovery through the readiness contract", async () => {
   const { default: router } = await import("../routes/health");
   const { applyMigrations } = await import("./migrate");
   await applyMigrations();
@@ -102,11 +103,18 @@ it("keeps liveness healthy and distinguishes configuration from last-send failur
   expect(response.body.email).toMatchObject({ links: "invalid", provider: "unchecked" });
   await request(app).get("/api/healthz").expect(200, { status: "ok" });
   vi.stubEnv("SITE_URL", "https://example.test");
-  recordEmailSend(false);
+  recordEmailSend("temporary_failure");
   response = await request(app).get("/api/readyz").expect(503);
   expect(response.body.email).toMatchObject({ links: "valid", provider: "unavailable" });
   expect(response.headers["cache-control"]).toBe("no-store");
-  recordEmailSend(true);
+  const now = Date.now();
+  vi.spyOn(Date, "now").mockReturnValue(now + 60_000);
+  response = await request(app).get("/api/readyz").expect(200);
+  expect(response.body.email.provider).toBe("unchecked");
+  recordEmailSend("configuration_error");
+  response = await request(app).get("/api/readyz").expect(503);
+  expect(response.body.email.provider).toBe("unavailable");
+  recordEmailSend("success");
   await request(app).get("/api/readyz").expect(200);
   vi.stubEnv("RESEND_API_KEY", "");
   response = await request(app).get("/api/readyz").expect(200);
