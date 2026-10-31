@@ -6,6 +6,8 @@
  * The Postgres function `run_migration(sql text)` must be created
  * once in the Supabase SQL editor (see migration.sql).  If the function is
  * absent the server still boots and logs a clear warning.
+ * Existing helpers must be upgraded manually with migration-helper.sql while
+ * replicas are paused; replacing a legacy unlocked helper through itself races.
  */
 
 import { getProofCleanupClient } from "./proof-cleanup-client";
@@ -241,7 +243,7 @@ function isTransient(error: unknown, status: number): boolean {
   const { code } = errorInfo(error);
   // SQL/configuration errors take precedence over HTTP status or error text.
   if (/^[0-9]{2}[0-9A-Z]{3}$/.test(code)) {
-    return code.startsWith("08") || ["57P01", "57P02", "57P03"].includes(code);
+    return code.startsWith("08") || ["57P01", "57P02", "57P03", "55P03", "40P01"].includes(code);
   }
   if (code.startsWith("PGRST")) {
     return ["PGRST000", "PGRST001", "PGRST002", "PGRST003"].includes(code);
@@ -300,7 +302,7 @@ async function runMigrations(): Promise<boolean> {
     if (info.code === "PGRST202") {
       logger.warn(
         { attempt, code: info.code, sql: (MIGRATION_SQL + PROOF_CLEANUP_SQL).trim() },
-        "[migrate] Migration helper missing; run this SQL in the Supabase SQL editor (not retried)",
+        "[migrate] Migration helper missing; install migration-helper.sql as database owner, then run this SQL in the Supabase SQL editor (not retried)",
       );
       return false;
     }
@@ -314,7 +316,7 @@ async function runMigrations(): Promise<boolean> {
     if (attempt === MIGRATION_MAX_ATTEMPTS) {
       logger.error(
         { attempt, status, ...info },
-        "[migrate] Temporary connection failure; retry limit reached, migrations remain unapplied (non-fatal)",
+        "[migrate] Temporary connection/lock failure; retry limit reached, migrations remain unapplied (non-fatal)",
       );
       return false;
     }
@@ -324,7 +326,7 @@ async function runMigrations(): Promise<boolean> {
     );
     logger.warn(
       { attempt, status, ...info, retryInMs },
-      "[migrate] Temporary connection failure; retry scheduled",
+      "[migrate] Temporary connection/lock failure; retry scheduled",
     );
     await new Promise<void>((resolve) => setTimeout(resolve, retryInMs));
   }

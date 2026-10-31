@@ -72,6 +72,8 @@ describe("startup migration recovery", () => {
     [{ code: "", message: "upstream unavailable" }, 503],
     [{ code: "PGRST001", message: "connection unavailable" }, 503],
     [{ code: "08006", message: "connection failure" }, 500],
+    [{ code: "55P03", message: "canceling statement due to lock timeout" }, 500],
+    [{ code: "40P01", message: "deadlock detected" }, 500],
     [{ name: "TimeoutError", message: "TimeoutError: request timed out" }, 0],
   ])("bounds retries for transient failure %j", async (error, status) => {
     abortSignal.mockResolvedValue({ error, status });
@@ -145,6 +147,20 @@ describe("startup migration recovery", () => {
     expect(timeout).toHaveBeenCalledWith(MIGRATION_TIMEOUT_MS);
     expect(rpc).toHaveBeenCalledTimes(2);
     expect(abortSignal.mock.calls[1]![0]).not.toBe(signal);
+  });
+
+  it("recovers from migration lock contention without blocking the caller", async () => {
+    abortSignal.mockResolvedValueOnce({
+      error: { code: "55P03", message: "lock timeout" }, status: 500,
+    });
+    const migration = applyMigrations();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getMigrationStatus()).toBe("pending");
+    expect(rpc).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await migration;
+    expect(getMigrationStatus()).toBe("succeeded");
+    expect(rpc).toHaveBeenCalledTimes(2);
   });
 
   it("marks unexpected runner failures as failed before propagating them", async () => {

@@ -4,12 +4,19 @@
 --   3. Create the status_history table with RLS and an automatic trigger.
 
 -- Step 1: helper that lets the server apply DDL via rpc()
+-- Existing installations: pause API replicas, apply migration-helper.sql as the
+-- database owner, then resume replicas. Do not upgrade via the old unlocked RPC.
 CREATE OR REPLACE FUNCTION run_migration(sql text)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
+SET lock_timeout = '5s'
 AS $$
 BEGIN
+  -- Dedicated two-int namespace, distinct from per-order bigint locks.
+  -- Held until transaction commit/rollback, not merely until EXECUTE returns.
+  PERFORM pg_advisory_xact_lock(1146112850, 1);
   EXECUTE sql;
 END;
 $$;
