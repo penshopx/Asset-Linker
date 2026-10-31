@@ -14,3 +14,15 @@ RPC pembersihan dan helper migrasi wajib memakai kredensial khusus server, bukan
 **Why:** RLS tidak membatasi fungsi `SECURITY DEFINER`; izin eksekusi bawaan PUBLIC dapat melewati perlindungan tabel. Helper DDL yang tetap terbuka juga dapat mengembalikan izin yang sudah dicabut. Token lease mencegah hasil proses lama menutup pekerjaan yang sudah diambil proses baru.
 
 **How to apply:** Cabut EXECUTE dari PUBLIC, anon, dan authenticated pada semua RPC tersebut dan helper migrasi; berikan hanya ke service_role. Jangan membuat fallback ke anon bila kunci server belum dikonfigurasi.
+
+Rekonsiliasi bukti historis harus merupakan tindakan operator yang disengaja,
+bukan bagian dari startup atau pemindaian otomatis. Tinjau laporan sebelum
+mengizinkan kandidat historis masuk ke antrean penghapusan.
+
+**Why:** File lama tidak memiliki reservasi unggah. Jika database pesanan yang
+sedang diperiksa belum lengkap atau sedang dipulihkan, tidak adanya referensi
+bukan bukti bahwa file aman dihapus. Batas usia saja tidak menyelesaikan risiko ini.
+
+**How to apply:** Pertahankan mode laporan sebagai default dan opt-in terpisah
+untuk antrekan historis; jangan memperluas worker retry menjadi penemu file lama
+otomatis tanpa keputusan operasional baru.

@@ -174,6 +174,53 @@ RETURNS VOID LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
     WHERE filename = p_filename AND state = 'deleting' AND lease_token = p_lease_token;
 $$;
 
+-- Historical objects have no reservation. Scan the storage catalog using a
+-- stable keyset (including nested paths), never offsets that shift on deletion.
+CREATE OR REPLACE FUNCTION reconcile_legacy_proofs(
+  p_before TIMESTAMPTZ,
+  p_after TEXT DEFAULT '',
+  p_limit INTEGER DEFAULT 100,
+  p_enqueue BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE(filename TEXT, outcome TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_filename TEXT;
+BEGIN
+  IF p_before IS NULL OR NOT isfinite(p_before) OR p_before > NOW() - INTERVAL '24 hours' THEN
+    RAISE EXCEPTION 'Historical proof cutoff must be at least 24 hours old';
+  END IF;
+  IF p_limit IS NULL OR p_limit < 1 OR p_limit > 500 OR p_after IS NULL OR p_enqueue IS NULL THEN
+    RAISE EXCEPTION 'Invalid reconciliation options';
+  END IF;
+  FOR v_filename IN
+    SELECT o.name FROM storage.objects o
+    WHERE o.bucket_id = 'proofs' AND o.name COLLATE "C" > p_after COLLATE "C"
+      AND o.created_at < p_before AND o.updated_at < p_before
+    ORDER BY o.name COLLATE "C" LIMIT p_limit
+  LOOP
+    -- Same lock as order writes and cleanup claims. Inserting a reservation is
+    -- not permission to delete: the worker must still obtain its guarded claim.
+    PERFORM pg_advisory_xact_lock(hashtext('proof:' || v_filename)::bigint);
+    filename := v_filename;
+    IF EXISTS (
+      SELECT 1 FROM orders WHERE bukti_filename = v_filename
+        OR split_part(split_part(bukti_url, '/storage/v1/object/public/proofs/', 2), '?', 1) = v_filename
+    ) THEN
+      outcome := 'referenced';
+    ELSIF EXISTS (SELECT 1 FROM proof_cleanup q WHERE q.filename = v_filename) THEN
+      outcome := 'tracked';
+    ELSIF p_enqueue THEN
+      INSERT INTO proof_cleanup(filename, next_attempt_at) VALUES (v_filename, NOW())
+        ON CONFLICT DO NOTHING;
+      outcome := CASE WHEN FOUND THEN 'queued' ELSE 'tracked' END;
+    ELSE
+      outcome := 'candidate';
+    END IF;
+    RETURN NEXT;
+  END LOOP;
+END;
+$$;
+
 -- RLS does not restrict SECURITY DEFINER RPCs. Only the server credential may
 -- execute these functions, never the publicly usable anon/authenticated roles.
 DO $$
@@ -181,7 +228,8 @@ DECLARE v_role TEXT; v_function TEXT;
 BEGIN
   FOREACH v_function IN ARRAY ARRAY[
     'register_proof_upload(TEXT)', 'claim_proof_cleanup(TEXT, UUID, BOOLEAN)',
-    'complete_proof_cleanup(TEXT, UUID)', 'due_proof_cleanups()', 'run_migration(TEXT)'
+    'complete_proof_cleanup(TEXT, UUID)', 'due_proof_cleanups()', 'run_migration(TEXT)',
+    'reconcile_legacy_proofs(TIMESTAMPTZ, TEXT, INTEGER, BOOLEAN)'
   ] LOOP
     IF to_regprocedure(v_function) IS NOT NULL THEN
       EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', v_function);

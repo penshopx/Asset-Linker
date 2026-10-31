@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PROOF_CLEANUP_SQL } from "./proof-cleanup-migration";
+import { reconcileLegacyProofs } from "./proof-reconciliation";
 
 const { rpc, remove, warn } = vi.hoisted(() => ({
   rpc: vi.fn(), remove: vi.fn(), warn: vi.fn(),
@@ -43,6 +44,13 @@ beforeAll(() => {
   ]);
   started = true;
   sql(`CREATE TABLE orders (id SERIAL PRIMARY KEY);
+    CREATE SCHEMA storage;
+    CREATE TABLE storage.objects (
+      bucket_id TEXT NOT NULL, name TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW() - INTERVAL '7 days',
+      updated_at TIMESTAMPTZ DEFAULT NOW() - INTERVAL '7 days',
+      PRIMARY KEY(bucket_id, name)
+    );
     CREATE ROLE cleanup_anon NOLOGIN; CREATE ROLE anon NOLOGIN;
     CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN;
     CREATE FUNCTION run_migration(sql TEXT) RETURNS VOID LANGUAGE plpgsql
@@ -59,12 +67,19 @@ afterEach(() => vi.useRealTimers());
 
 beforeEach(() => {
   vi.clearAllMocks();
-  sql("TRUNCATE orders, proof_cleanup;");
+  sql("TRUNCATE orders, proof_cleanup, storage.objects;");
   remove.mockResolvedValue({ error: null });
   rpc.mockImplementation((name: string, params: Record<string, unknown> = {}) => ({
     abortSignal: async () => {
       const filename = quote(String(params.p_filename ?? ""));
       switch (name) {
+        case "reconcile_legacy_proofs":
+          return {
+            data: JSON.parse(sql(`SET ROLE service_role; SELECT COALESCE(jsonb_agg(r), '[]')
+              FROM reconcile_legacy_proofs(${quote(String(params.p_before))},
+                ${quote(String(params.p_after))}, ${Number(params.p_limit)}, ${params.p_enqueue === true}) r;`).split("\n").at(-1)!),
+            error: null,
+          };
         case "register_proof_upload":
           sql(`SET ROLE service_role; SELECT register_proof_upload(${filename});`);
           return { data: null, error: null };
@@ -205,6 +220,7 @@ describe("persistent proof cleanup with real PostgreSQL", () => {
       "claim_proof_cleanup('attack.pdf', '11111111-1111-4111-8111-111111111111', TRUE)",
       "complete_proof_cleanup('attack.pdf', '11111111-1111-4111-8111-111111111111')",
       "run_migration('SELECT 1')",
+      "reconcile_legacy_proofs(NOW() - INTERVAL '2 days')",
     ];
     for (const call of calls) {
       expect(() => sql(`SET ROLE ${role}; SELECT ${call};`)).toThrow(/permission denied/);
@@ -225,5 +241,114 @@ describe("persistent proof cleanup with real PostgreSQL", () => {
     expect(sql("SELECT state FROM proof_cleanup;")).toBe("deleting");
     sql(`SELECT complete_proof_cleanup('lease.pdf', '${token2}');`);
     expect(sql("SELECT state FROM proof_cleanup;")).toBe("deleted");
+  });
+});
+
+describe("historical proof reconciliation", () => {
+  const before = () => new Date(Date.now() - 2 * 86_400_000).toISOString();
+
+  it("reports nested files across pages without touching the queue or storage", async () => {
+    sql(`INSERT INTO storage.objects(bucket_id, name) VALUES
+      ('proofs', 'a.pdf'), ('proofs', 'folder/b.pdf'), ('proofs', 'z.pdf'),
+      ('other-bucket', 'private.pdf');
+      INSERT INTO storage.objects(bucket_id, name, created_at, updated_at) VALUES
+      ('proofs', 'new.pdf', NOW(), NOW()),
+      ('proofs', 'recently-replaced.pdf', NOW() - INTERVAL '7 days', NOW()),
+      ('proofs', 'unknown-date.pdf', NULL, NULL);`);
+    const first = await reconcileLegacyProofs({ before: before(), limit: 2 });
+    expect(first.entries).toEqual([
+      { filename: "a.pdf", outcome: "candidate" },
+      { filename: "folder/b.pdf", outcome: "candidate" },
+    ]);
+    expect(first.nextCursor).toBe("folder/b.pdf");
+    const last = await reconcileLegacyProofs({
+      before: before(), limit: 2, after: first.nextCursor!,
+    });
+    expect(last.entries).toEqual([{ filename: "z.pdf", outcome: "candidate" }]);
+    expect(last.nextCursor).toBeNull();
+    expect(sql("SELECT count(*) FROM proof_cleanup;")).toBe("0");
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("protects filename and legacy URL references while queuing only orphan files", async () => {
+    sql(`INSERT INTO storage.objects(bucket_id, name) VALUES
+      ('proofs', 'filename.pdf'), ('proofs', 'folder/url.pdf'), ('proofs', 'orphan.pdf');
+      INSERT INTO orders(bukti_filename) VALUES ('filename.pdf');
+      INSERT INTO orders(bukti_url) VALUES
+      ('https://example.test/storage/v1/object/public/proofs/folder/url.pdf?download=1');`);
+    const report = await reconcileLegacyProofs({ before: before(), enqueue: true });
+    expect(report.entries).toEqual([
+      { filename: "filename.pdf", outcome: "referenced" },
+      { filename: "folder/url.pdf", outcome: "referenced" },
+      { filename: "orphan.pdf", outcome: "queued" },
+    ]);
+    expect(remove).not.toHaveBeenCalled(); // Discovery never deletes directly.
+    expect(sql("SELECT filename FROM proof_cleanup;")).toBe("orphan.pdf");
+    await retryProofCleanups();
+    expect(remove).toHaveBeenCalledExactlyOnceWith(["orphan.pdf"]);
+    const again = await reconcileLegacyProofs({ before: before(), enqueue: true });
+    expect(again.entries.at(-1)?.outcome).toBe("tracked");
+    expect(sql("SELECT state || ':' || attempts FROM proof_cleanup;")).toBe("deleted:1");
+  });
+
+  it("does not skip later pages when objects from earlier pages disappear", async () => {
+    sql(`INSERT INTO storage.objects(bucket_id, name) VALUES
+      ('proofs', 'a.pdf'), ('proofs', 'b.pdf'), ('proofs', 'c.pdf'), ('proofs', 'd.pdf');`);
+    const first = await reconcileLegacyProofs({ before: before(), limit: 2, enqueue: true });
+    sql("DELETE FROM storage.objects WHERE name IN ('a.pdf', 'b.pdf');");
+    const second = await reconcileLegacyProofs({
+      before: before(), after: first.nextCursor!, limit: 2, enqueue: true,
+    });
+    expect(second.entries.map((entry) => entry.filename)).toEqual(["c.pdf", "d.pdf"]);
+    expect(second.nextCursor).toBe("d.pdf");
+    const end = await reconcileLegacyProofs({ before: before(), after: second.nextCursor!, limit: 2 });
+    expect(end).toEqual({ entries: [], nextCursor: null });
+  });
+
+  it("rechecks references after the report and after enqueue, before removal", async () => {
+    sql("INSERT INTO storage.objects(bucket_id, name) VALUES ('proofs', 'late-order.pdf');");
+    expect((await reconcileLegacyProofs({ before: before() })).entries[0]?.outcome).toBe("candidate");
+    sql("INSERT INTO orders(bukti_filename) VALUES ('late-order.pdf');");
+    expect((await reconcileLegacyProofs({ before: before(), enqueue: true })).entries[0]?.outcome).toBe("referenced");
+    sql("DELETE FROM orders;");
+    await reconcileLegacyProofs({ before: before(), enqueue: true });
+    sql("INSERT INTO orders(bukti_filename) VALUES ('late-order.pdf');");
+    await retryProofCleanups();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing reservations, leases and tombstones", async () => {
+    sql(`INSERT INTO storage.objects(bucket_id, name) VALUES
+      ('proofs', 'pending.pdf'), ('proofs', 'leased.pdf'), ('proofs', 'deleted.pdf');
+      INSERT INTO proof_cleanup(filename, state, attempts) VALUES
+      ('pending.pdf', 'pending', 0), ('leased.pdf', 'deleting', 3), ('deleted.pdf', 'deleted', 1);`);
+    const snapshot = sql("SELECT json_agg(q ORDER BY filename) FROM proof_cleanup q;");
+    const result = await reconcileLegacyProofs({ before: before(), enqueue: true });
+    expect(result.entries.every((entry) => entry.outcome === "tracked")).toBe(true);
+    expect(sql("SELECT json_agg(q ORDER BY filename) FROM proof_cleanup q;")).toBe(snapshot);
+  });
+
+  it("rejects unsafe cutoffs and unbounded pages at both boundaries", async () => {
+    for (const cutoff of [new Date().toISOString(), "not-a-date"]) {
+      await expect(reconcileLegacyProofs({ before: cutoff })).rejects.toThrow(/cutoff/);
+    }
+    for (const limit of [0, 501, 1.5]) {
+      await expect(reconcileLegacyProofs({ before: before(), limit })).rejects.toThrow(/Page size/);
+    }
+    for (const args of [
+      "NOW()", "'infinity'", "NULL",
+      "NOW() - INTERVAL '2 days', '', 0",
+      "NOW() - INTERVAL '2 days', '', 501",
+      "NOW() - INTERVAL '2 days', NULL",
+    ]) {
+      expect(() => sql(`SELECT * FROM reconcile_legacy_proofs(${args});`)).toThrow();
+    }
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("fails explicitly if discovery cannot access the database", async () => {
+    rpc.mockReturnValueOnce({ abortSignal: async () => ({ error: new Error("DB unavailable") }) });
+    await expect(reconcileLegacyProofs({ before: before() })).rejects.toThrow("DB unavailable");
+    expect(remove).not.toHaveBeenCalled();
   });
 });
