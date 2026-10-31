@@ -3,9 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TestRenderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import AdminPesanan from './AdminPesanan';
 
-// Render the real page, dashboard, and rows; only the HTTP/browser boundaries
-// are replaced. No production admin credentials or email provider are used.
-const PASSCODE = 'test-only-admin';
+// AccountGate has separate session-boundary tests. Render the real dashboard,
+// rows and timeline with an authorized account fixture here.
+vi.mock('@/components/AdminAccount', () => ({
+  default: ({ children }: any) => children(
+    { id: 'user_rina', name: 'Admin Rina', email: 'rina@example.test' }, vi.fn(),
+  ),
+  adminFetch: (url: string, init?: RequestInit) => fetch(url, init),
+}));
 const LIST_URL = '/api/admin/orders';
 const ORIGINAL_ERROR = 'Provider temporarily unavailable';
 const LATEST_ERROR = 'Gagal mengirim email: Mailbox rejected';
@@ -71,7 +76,7 @@ function expectFailureCount(count: number) {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('sessionStorage', {
-    getItem: vi.fn((key: string) => key === 'dp_admin_pc' ? PASSCODE : key === 'dp_admin_name' ? 'Admin Rina' : null),
+    getItem: vi.fn(() => null),
     setItem: vi.fn(),
     removeItem: vi.fn(),
   });
@@ -88,7 +93,7 @@ beforeEach(() => {
   ];
   retryResponse = { status: 200, body: { ok: true, message: 'Email konfirmasi berhasil dikirim ulang.' } };
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    expect(init?.headers).toEqual({ 'x-admin-passcode': PASSCODE });
+    expect(init?.headers).toBeUndefined();
     if (url === LIST_URL && !init?.method) {
       // Use a wire-like snapshot so mutation of server fixtures cannot update
       // the UI without a real list request or the page's mutation handler.
@@ -159,7 +164,7 @@ describe('admin buyer email warning integration', () => {
     await act(async () => { await retry.props.onClick(); });
 
     expect(fetchMock).toHaveBeenCalledWith(`${LIST_URL}/failed/retry-buyer-email`, {
-      method: 'POST', headers: { 'x-admin-passcode': PASSCODE },
+      method: 'POST',
     });
     expect(fetchMock).toHaveBeenCalledTimes(2); // No refresh needed for the update.
     expectFailureCount(1);
@@ -210,9 +215,7 @@ describe('admin buyer email warning integration', () => {
 
     await click('Coba kirim ulang');
 
-    expect(fetchMock).toHaveBeenLastCalledWith(`${LIST_URL}/failed`, {
-      headers: { 'x-admin-passcode': PASSCODE },
-    });
+    expect(fetchMock).toHaveBeenLastCalledWith(`${LIST_URL}/failed`, undefined);
     expectFailureCount(0);
     expect(visibleText()).not.toContain(ORIGINAL_ERROR);
     expect(visibleText()).not.toContain(conflict);
@@ -256,9 +259,7 @@ describe('admin buyer email warning integration', () => {
 
       await click('Coba kirim ulang');
 
-      expect(fetchMock).toHaveBeenLastCalledWith(`${LIST_URL}/failed`, {
-        headers: { 'x-admin-passcode': PASSCODE },
-      });
+      expect(fetchMock).toHaveBeenLastCalledWith(`${LIST_URL}/failed`, undefined);
       expectFailureCount(persistedError ? 1 : 0);
       expect(visibleText()).toContain('PT failed');
       expect(visibleText()).not.toContain(conflict);
@@ -356,41 +357,22 @@ describe('admin buyer email warning integration', () => {
 });
 
 describe('admin identity and timeline', () => {
-  it('requires a name when resuming an old passcode-only session', async () => {
-    vi.mocked(sessionStorage.getItem).mockImplementation(key => key === 'dp_admin_pc' ? PASSCODE : null);
+  it('shows the verified account without editable identity fields', async () => {
     await mount();
-    expect(visibleText()).toContain('Nama admin');
-    expect(visibleText()).toContain('bukan akun terverifikasi');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(visibleText()).toContain('Admin Rina · rina@example.test (akun terverifikasi)');
+    expect(renderer!.root.findAllByProps({ type: 'password' })).toHaveLength(0);
+    expect(button('Keluar / Ganti admin')).toBeTruthy();
   });
 
-  it('stores the trimmed name when logging in and clears it on logout', async () => {
-    vi.mocked(sessionStorage.getItem).mockReturnValue(null);
-    await mount();
-    await act(async () => {
-      renderer!.root.findByProps({ type: 'text' }).props.onChange({ target: { value: '  Admin Rina  ' } });
-      renderer!.root.findByProps({ type: 'password' }).props.onChange({ target: { value: PASSCODE } });
-    });
-    await act(async () => {
-      await renderer!.root.findByType('form').props.onSubmit({ preventDefault() {} });
-    });
-    expect(sessionStorage.setItem).toHaveBeenCalledWith('dp_admin_name', 'Admin Rina');
-    expect(visibleText()).toContain('Admin: Admin Rina (diisi sendiri)');
-    await click('Keluar');
-    expect(sessionStorage.removeItem).toHaveBeenCalledWith('dp_admin_name');
-    expect(sessionStorage.removeItem).toHaveBeenCalledWith('dp_admin_pc');
-    expect(visibleText()).toContain('Nama admin');
-  });
-
-  it('sends the session identity and refreshes the open timeline after a change', async () => {
+  it('sends only status and refreshes the open timeline after a change', async () => {
     const current = order('one');
     serverOrders = [current];
     let changed = false;
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === LIST_URL) return { ok: true, json: async () => serverOrders };
       if (init?.method === 'PATCH') {
-        expect(JSON.parse(init.body as string)).toEqual({ status: 'diproses', changed_by: 'Admin Rina' });
-        expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'x-admin-passcode': PASSCODE });
+        expect(JSON.parse(init.body as string)).toEqual({ status: 'diproses' });
+        expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
         changed = true;
         return { ok: true, json: async () => ({ ...current, status: 'diproses' }) };
       }
@@ -400,7 +382,7 @@ describe('admin identity and timeline', () => {
           ...current,
           history: [
             { status: 'baru', changed_at: current.created_at, changed_by: null },
-            ...(changed ? [{ status: 'diproses', changed_at: current.created_at, changed_by: 'Admin Rina' }] : []),
+            ...(changed ? [{ status: 'diproses', changed_at: current.created_at, changed_by: 'Admin Rina', changed_by_verified: true }] : []),
           ],
         }),
       };

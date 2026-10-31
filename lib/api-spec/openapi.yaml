@@ -11,13 +11,29 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /admin/session:
+    get:
+      operationId: getAdminSession
+      summary: Verified personal admin account from the server session
+      responses:
+        "200":
+          description: Authorized admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminIdentity"
+        "401":
+          description: Missing or expired session
+        "403":
+          description: Email unverified or account lacks admin role
+        "503":
+          description: Identity provider unavailable
   /admin/orders/{id}:
     get:
       operationId: getAdminOrder
       summary: Order detail with admin-only actor names
       parameters:
         - $ref: "#/components/parameters/OrderId"
-        - $ref: "#/components/parameters/AdminPasscode"
       responses:
         "200":
           description: Order detail and chronological history
@@ -26,7 +42,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminOrderDetail"
         "401":
-          description: Invalid or missing passcode
+          description: Missing or expired session
+        "403":
+          description: Account lacks admin role
         "404":
           description: Order not found
         "500":
@@ -34,10 +52,9 @@ paths:
   /admin/orders/{id}/status:
     patch:
       operationId: changeAdminOrderStatus
-      summary: Change status with a self-declared shared-passcode admin name
+      summary: Change status with identity derived from a verified admin session
       parameters:
         - $ref: "#/components/parameters/OrderId"
-        - $ref: "#/components/parameters/AdminPasscode"
       requestBody:
         required: true
         content:
@@ -52,9 +69,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminOrder"
         "400":
-          description: Invalid status or missing/invalid admin name
+          description: Invalid status or client-supplied actor
         "401":
-          description: Invalid or missing passcode
+          description: Missing or expired session
+        "403":
+          description: Account lacks admin role or request origin is not allowed
         "500":
           description: Status was not saved
         "503":
@@ -115,27 +134,27 @@ components:
       required: true
       schema:
         type: string
-    AdminPasscode:
-      name: x-admin-passcode
-      in: header
-      required: true
-      schema:
-        type: string
   schemas:
+    AdminIdentity:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
     OrderStatus:
       type: string
       enum: [baru, diproses, selesai, dibatalkan]
     OrderStatusChangeInput:
       type: object
-      required: [status, changed_by]
+      required: [status]
+      additionalProperties: false
       properties:
         status:
           $ref: "#/components/schemas/OrderStatus"
-        changed_by:
-          type: string
-          minLength: 1
-          maxLength: 80
-          description: Trimmed self-declared admin name, no control characters; not a verified personal account.
     AdminOrder:
       type: object
       additionalProperties: true
@@ -167,6 +186,12 @@ components:
         changed_by:
           type: [string, "null"]
           description: Absent or null for legacy entries and initial buyer submission.
+        changed_by_id:
+          type: [string, "null"]
+          description: Stable account ID, null for legacy entries. Admin-only.
+        changed_by_verified:
+          type: boolean
+          description: True only for server-verified personal account snapshots; false for legacy self-declared names.
     EmailReadinessStatus:
       type: object
       required: [status, email, database]

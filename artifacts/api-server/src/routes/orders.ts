@@ -14,7 +14,8 @@ import {
   type FailedBuyerEmailOrder,
 } from "../lib/buyer-email-retry";
 import type { OrderEmailData } from "../lib/mailer";
-import { decryptAdminActor, encryptAdminActor, withoutActorEnvelope } from "../lib/admin-actor";
+import { decryptAdminIdentity, encryptVerifiedAdminActor, withoutActorEnvelope } from "../lib/admin-actor";
+import { requireAdmin, type AdminIdentity } from "../middlewares/require-admin";
 import { cleanupUploadedProof, registerProofUpload } from "../lib/proof-cleanup";
 
 const router = Router();
@@ -41,14 +42,9 @@ function isMissingStatusHistoryTableError(error: unknown): boolean {
   );
 }
 
-// ─── Auth middleware for admin routes ────────────────────────────────────────
-function requireAdmin(req: any, res: any, next: any) {
-  const passcode = req.headers["x-admin-passcode"] as string | undefined;
-  if (!passcode || passcode !== process.env["ADMIN_PASSCODE"]) {
-    return res.status(401).json({ error: "Passcode salah atau tidak ada." });
-  }
-  next();
-}
+router.get("/admin/session", requireAdmin, (_req, res) => {
+  res.json(res.locals.admin);
+});
 
 // ─── POST /api/konfirmasi-pesanan ─────────────────────────────────────────────
 router.post(
@@ -284,7 +280,7 @@ router.get("/admin/orders", requireAdmin, async (_req, res) => {
 
 // ─── GET /api/admin/orders/:id — order detail with status history ──────────────
 router.get("/admin/orders/:id", requireAdmin, async (req, res): Promise<void> => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const [orderResult, historyResult] = await Promise.all([
     supabase.from("orders").select("*").eq("id", id).maybeSingle(),
     supabase
@@ -327,7 +323,7 @@ router.get("/admin/orders/:id", requireAdmin, async (req, res): Promise<void> =>
         ? historyResult.data.map(entry => ({
             status: entry.status,
             changed_at: entry.changed_at,
-            changed_by: decryptAdminActor(entry.changed_by, id),
+            ...decryptAdminIdentity(entry.changed_by, id),
           }))
         : [],
     });
@@ -339,13 +335,10 @@ router.get("/admin/orders/:id", requireAdmin, async (req, res): Promise<void> =>
 
 // ─── PATCH /api/admin/orders/:id/status ──────────────────────────────────────
 router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { status, changed_by } = req.body ?? {};
-  // Shared-passcode admins declare their name; this is not a verified account.
-  // Validate before writing, and persist the name with the status atomically.
-  const adminName = typeof changed_by === "string" ? changed_by.trim() : "";
-  if (!adminName || adminName.length > 80 || /[\u0000-\u001f\u007f]/.test(adminName)) {
-    return res.status(400).json({ error: "Nama admin wajib diisi, maksimal 80 karakter tanpa karakter kontrol." });
+  const id = String(req.params.id);
+  const { status } = req.body ?? {};
+  if (Object.hasOwn(req.body ?? {}, "changed_by")) {
+    return res.status(400).json({ error: "Identitas admin ditentukan dari sesi, bukan isian klien." });
   }
 
   const VALID = ["baru", "diproses", "selesai", "dibatalkan"];
@@ -355,7 +348,7 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
 
   let encryptedActor: string;
   try {
-    encryptedActor = encryptAdminActor(adminName, id);
+    encryptedActor = encryptVerifiedAdminActor(res.locals.admin as AdminIdentity, id);
   } catch {
     req.log.error("Admin audit encryption is not configured");
     return res.status(503).json({ error: "Pencatatan identitas admin belum siap. Status tidak diubah." });
@@ -441,7 +434,7 @@ router.patch("/admin/orders/:id/status", requireAdmin, async (req, res) => {
 
 // ─── POST /api/admin/orders/:id/retry-buyer-email ────────────────────────────
 router.post("/admin/orders/:id/retry-buyer-email", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params.id);
 
   const { data: order, error: fetchError } = await supabase
     .from("orders")

@@ -15,4 +15,11 @@ export interface AdminStatusHistoryEntry {
      * @nullable
      */
   changed_by?: string | null;
+  /**
+     * Stable account ID, null for legacy entries. Admin-only.
+     * @nullable
+     */
+  changed_by_id?: string | null;
+  /** True only for server-verified personal account snapshots; false for legacy self-declared names. */
+  changed_by_verified?: boolean;
 }

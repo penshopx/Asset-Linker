@@ -14,6 +14,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Simulator} />
       <Route path="/admin-pesanan" component={AdminPesanan} />
+      <Route path="/admin-daftar" component={AdminPesanan} />
       <Route path="/cek-pesanan" component={CekPesanan} />
       <Route component={NotFound} />
     </Switch>

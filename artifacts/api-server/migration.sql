@@ -56,6 +56,14 @@ CREATE INDEX IF NOT EXISTS status_history_order_id_idx ON status_history (order_
 -- Nullable for legacy rows and the initial, buyer-created status.
 ALTER TABLE status_history ADD COLUMN IF NOT EXISTS changed_by TEXT DEFAULT NULL;
 
+-- Personal accounts: the existing authenticated envelope now holds an encrypted
+-- versioned identity (provider ID + name snapshot). No backfill: legacy nulls
+-- remain unknown, and old name-only envelopes remain self-declared.
+COMMENT ON COLUMN status_history.changed_by IS
+  'AES-GCM envelope bound to order_id; v2 plaintext is a server-verified account snapshot, legacy plaintext is a self-declared name. NULL remains unknown.';
+COMMENT ON COLUMN orders.status_changed_by IS
+  'Internal encrypted actor snapshot copied atomically by the status-history trigger. Never accept identity from an API client.';
+
 -- Actor columns contain AES-GCM envelopes only, never plaintext names.
 -- The anon-key database client can read envelopes, but only the admin API
 -- has the server-held SESSION_SECRET required to decrypt them.

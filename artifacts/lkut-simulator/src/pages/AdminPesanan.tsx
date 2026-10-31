@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Lock, RefreshCw, MessageCircle, ExternalLink, ChevronDown, ChevronUp, History, Package, CheckCircle2, Clock, XCircle, AlertCircle, MailWarning } from 'lucide-react';
+import { RefreshCw, MessageCircle, ExternalLink, ChevronDown, ChevronUp, History, Package, CheckCircle2, Clock, XCircle, AlertCircle, MailWarning } from 'lucide-react';
+import AdminAccount, { adminFetch } from '@/components/AdminAccount';
 
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
@@ -9,6 +10,8 @@ interface StatusHistoryEntry {
   status: OrderStatus;
   changed_at: string;
   changed_by?: string | null;
+  changed_by_id?: string | null;
+  changed_by_verified?: boolean;
 }
 
 interface Order {
@@ -46,100 +49,6 @@ function waLink(phone: string) {
   return `https://wa.me/${phone.replace(/\D/g, '')}`;
 }
 
-// ─── Login Screen ─────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }: { onLogin: (passcode: string, adminName: string) => void }) {
-  const [input, setInput] = useState('');
-  const [adminName, setAdminName] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adminName.trim() || adminName.trim().length > 80 || /[\u0000-\u001f\u007f]/.test(adminName)) {
-      setError('Nama admin wajib diisi, maksimal 80 karakter tanpa karakter kontrol.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API_BASE}/admin/orders`, {
-        headers: { 'x-admin-passcode': input },
-      });
-      if (res.status === 401) {
-        setError('Passcode salah. Coba lagi.');
-      } else if (res.ok) {
-        onLogin(input, adminName.trim());
-      } else {
-        setError('Terjadi kesalahan server. Coba lagi.');
-      }
-    } catch {
-      setError('Tidak dapat terhubung ke server.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="bg-slate-800 border border-slate-700 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-full p-4">
-            <Lock className="w-8 h-8 text-amber-400" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-xl font-bold text-white">Admin DokumenProyek</h1>
-            <p className="text-slate-400 text-sm mt-1">Masukkan nama dan passcode untuk lanjut</p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <label className="block text-sm text-slate-300">
-            Nama admin
-            <input
-              type="text"
-              value={adminName}
-              onChange={e => setAdminName(e.target.value)}
-              required
-              maxLength={80}
-              autoComplete="name"
-              autoFocus
-              className="mt-1 w-full bg-slate-700 border border-slate-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500"
-            />
-          </label>
-          <p className="text-xs text-slate-400">Nama dicatat pada riwayat perubahan. Identitas diisi sendiri, bukan akun terverifikasi.</p>
-          <input
-            type="password"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder="Passcode admin"
-            aria-label="Passcode admin"
-            required
-            className="w-full bg-slate-700 border border-slate-600 text-white placeholder-slate-400 rounded-lg px-4 py-3 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
-          />
-          {error && (
-            <p className="text-red-400 text-sm flex items-center gap-1.5">
-              <XCircle className="w-4 h-4 flex-shrink-0" /> {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading || !input || !adminName.trim()}
-            className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-bold py-3 rounded-lg transition-colors"
-          >
-            {loading ? 'Memeriksa…' : 'Masuk'}
-          </button>
-        </form>
-
-        <p className="text-center mt-6">
-          <a href={import.meta.env.BASE_URL} className="text-slate-500 hover:text-slate-300 text-sm transition-colors">
-            ← Kembali ke Simulator
-          </a>
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: OrderStatus }) {
   const cfg = STATUS_CONFIG[status];
@@ -151,7 +60,7 @@ function StatusBadge({ status }: { status: OrderStatus }) {
 }
 
 // ─── Order Row ────────────────────────────────────────────────────────────────
-function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; passcode: string; adminName: string; onUpdated: (updated: Order) => void }) {
+function OrderRow({ order, onUpdated }: { order: Order; onUpdated: (updated: Order) => void }) {
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState('');
   const [retryingEmail, setRetryingEmail] = useState(false);
@@ -169,9 +78,7 @@ function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; pas
     setHistoryLoading(true);
     setHistoryError('');
     try {
-      const res = await fetch(`${API_BASE}/admin/orders/${encodeURIComponent(order.id)}`, {
-        headers: { 'x-admin-passcode': passcode },
-      });
+      const res = await adminFetch(`${API_BASE}/admin/orders/${encodeURIComponent(order.id)}`);
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(body.error ?? 'Gagal memuat riwayat status.');
@@ -203,10 +110,10 @@ function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; pas
     if (newStatus === order.status) return;
     setUpdating(true);
     try {
-      const res = await fetch(`${API_BASE}/admin/orders/${order.id}/status`, {
+      const res = await adminFetch(`${API_BASE}/admin/orders/${order.id}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-admin-passcode': passcode },
-        body: JSON.stringify({ status: newStatus, changed_by: adminName }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
       });
       if (res.ok) {
         const updated = await res.json();
@@ -228,9 +135,8 @@ function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; pas
     setRetryingEmail(true);
     setRetryError('');
     try {
-      const res = await fetch(`${API_BASE}/admin/orders/${order.id}/retry-buyer-email`, {
+      const res = await adminFetch(`${API_BASE}/admin/orders/${order.id}/retry-buyer-email`, {
         method: 'POST',
-        headers: { 'x-admin-passcode': passcode },
       });
       const body = await res.json().catch(() => ({}));
 
@@ -238,9 +144,7 @@ function OrderRow({ order, passcode, adminName, onUpdated }: { order: Order; pas
         // Another process may have sent or claimed the email. A conflict is
         // not a delivery failure: reconcile only from the persisted order.
         try {
-          const latest = await fetch(`${API_BASE}/admin/orders/${encodeURIComponent(order.id)}`, {
-            headers: { 'x-admin-passcode': passcode },
-          });
+          const latest = await adminFetch(`${API_BASE}/admin/orders/${encodeURIComponent(order.id)}`);
           const updated = await latest.json();
           if (!latest.ok || updated?.id !== order.id) {
             throw new Error('Invalid order response');
@@ -437,7 +341,9 @@ function StatusTimeline({ history }: { history: StatusHistoryEntry[] }) {
                 </p>
                 <p className="mt-0.5 text-xs text-slate-400">{formatDate(entry.changed_at)}</p>
                 <p className="mt-1 text-xs text-slate-500 break-words">
-                  {entry.changed_by ? `Oleh: ${entry.changed_by}` : 'Identitas belum tercatat'}
+                  {entry.changed_by
+                    ? `Oleh: ${entry.changed_by} (${entry.changed_by_verified ? 'akun terverifikasi' : 'diisi sendiri — riwayat lama'})`
+                    : 'Identitas belum tercatat'}
                 </p>
               </div>
             </div>
@@ -449,7 +355,7 @@ function StatusTimeline({ history }: { history: StatusHistoryEntry[] }) {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminName: string; onLogout: () => void }) {
+function Dashboard({ adminName, onLogout }: { adminName: string; onLogout: () => Promise<void> }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -460,9 +366,7 @@ function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminN
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/admin/orders`, {
-        headers: { 'x-admin-passcode': passcode },
-      });
+      const res = await adminFetch(`${API_BASE}/admin/orders`);
       if (!res.ok) throw new Error('Gagal memuat data');
       setOrders(await res.json());
     } catch (e: any) {
@@ -470,7 +374,7 @@ function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminN
     } finally {
       setLoading(false);
     }
-  }, [passcode]);
+  }, []);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -504,14 +408,14 @@ function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminN
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <div className="bg-slate-900 text-white py-5 px-4 shadow-lg">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
-          <div>
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold">Dashboard Pesanan</h1>
             <p className="text-slate-400 text-sm">DokumenProyek Admin</p>
-            <p className="text-slate-300 text-xs mt-1 break-words">Admin: {adminName} (diisi sendiri)</p>
+            <p className="text-slate-300 text-xs mt-1 break-words">Admin: {adminName} (akun terverifikasi)</p>
           </div>
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={onLogout} className="text-sm text-slate-300 hover:text-white">Keluar</button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => void onLogout()} className="text-sm text-slate-300 hover:text-white">Keluar / Ganti admin</button>
             <button
               onClick={fetchOrders}
               className="inline-flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -599,7 +503,7 @@ function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminN
         ) : (
           <div className="space-y-3">
             {filtered.map(order => (
-              <OrderRow key={order.id} order={order} passcode={passcode} adminName={adminName} onUpdated={handleUpdated} />
+              <OrderRow key={order.id} order={order} onUpdated={handleUpdated} />
             ))}
           </div>
         )}
@@ -610,27 +514,7 @@ function Dashboard({ passcode, adminName, onLogout }: { passcode: string; adminN
 
 // ─── Page root ────────────────────────────────────────────────────────────────
 export default function AdminPesanan() {
-  const [passcode, setPasscode] = useState<string | null>(
-    sessionStorage.getItem('dp_admin_pc')
-  );
-  const [adminName, setAdminName] = useState<string | null>(
-    sessionStorage.getItem('dp_admin_name')
-  );
-
-  const handleLogin = (pc: string, name: string) => {
-    sessionStorage.setItem('dp_admin_pc', pc);
-    sessionStorage.setItem('dp_admin_name', name);
-    setPasscode(pc);
-    setAdminName(name);
-  };
-
-  const handleLogout = () => {
-    sessionStorage.removeItem('dp_admin_pc');
-    sessionStorage.removeItem('dp_admin_name');
-    setPasscode(null);
-    setAdminName(null);
-  };
-
-  if (!passcode || !adminName?.trim()) return <LoginScreen onLogin={handleLogin} />;
-  return <Dashboard passcode={passcode} adminName={adminName} onLogout={handleLogout} />;
+  return <AdminAccount>{(admin, logout) =>
+    <Dashboard key={admin.id} adminName={`${admin.name} · ${admin.email}`} onLogout={logout} />
+  }</AdminAccount>;
 }

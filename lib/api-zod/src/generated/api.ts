@@ -9,14 +9,20 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Verified personal admin account from the server session
+ */
+export const GetAdminSessionResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "email": zod.string()
+})
+
+
+/**
  * @summary Order detail with admin-only actor names
  */
 export const GetAdminOrderParams = zod.object({
   "id": zod.coerce.string()
-})
-
-export const GetAdminOrderHeader = zod.object({
-  "x-admin-passcode": zod.string()
 })
 
 export const GetAdminOrderResponse = zod.object({
@@ -26,29 +32,22 @@ export const GetAdminOrderResponse = zod.object({
   "history": zod.array(zod.object({
   "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan']),
   "changed_at": zod.coerce.date(),
-  "changed_by": zod.string().nullish().describe('Absent or null for legacy entries and initial buyer submission.')
+  "changed_by": zod.string().nullish().describe('Absent or null for legacy entries and initial buyer submission.'),
+  "changed_by_id": zod.string().nullish().describe('Stable account ID, null for legacy entries. Admin-only.'),
+  "changed_by_verified": zod.boolean().optional().describe('True only for server-verified personal account snapshots; false for legacy self-declared names.')
 }))
 }))
 
 
 /**
- * @summary Change status with a self-declared shared-passcode admin name
+ * @summary Change status with identity derived from a verified admin session
  */
 export const ChangeAdminOrderStatusParams = zod.object({
   "id": zod.coerce.string()
 })
 
-export const ChangeAdminOrderStatusHeader = zod.object({
-  "x-admin-passcode": zod.string()
-})
-
-export const changeAdminOrderStatusBodyChangedByMax = 80;
-
-
-
 export const ChangeAdminOrderStatusBody = zod.object({
-  "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan']),
-  "changed_by": zod.string().min(1).max(changeAdminOrderStatusBodyChangedByMax).describe('Trimmed self-declared admin name, no control characters; not a verified personal account.')
+  "status": zod.enum(['baru', 'diproses', 'selesai', 'dibatalkan'])
 })
 
 export const ChangeAdminOrderStatusResponse = zod.object({

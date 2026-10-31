@@ -6,9 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './adminIdentity';
 export * from './adminOrder';
 export * from './adminOrderDetail';
-export * from './adminPasscodeParameter';
 export * from './adminStatusHistoryEntry';
 export * from './emailReadinessStatus';
 export * from './emailReadinessStatusDatabase';

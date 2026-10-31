@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AdminIdentity,
   AdminOrder,
   AdminOrderDetail,
   EmailReadinessStatus,
@@ -53,6 +54,83 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetAdminSessionUrl = () => {
+
+
+
+
+  return `/api/admin/session`
+}
+
+/**
+ * @summary Verified personal admin account from the server session
+ */
+export const getAdminSession = async ( options?: Parameters<typeof customFetch>[1]): Promise<AdminIdentity> => {
+
+  return customFetch<AdminIdentity>(getGetAdminSessionUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminSessionQueryKey = () => {
+    return [
+    `/api/admin/session`
+    ] as const;
+    }
+
+
+export const getGetAdminSessionQueryOptions = <TData = Awaited<ReturnType<typeof getAdminSession>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminSessionQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminSession>>> = ({ signal }) => getAdminSession({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminSession>>>
+export type GetAdminSessionQueryError = ErrorType<void>
+
+
+/**
+ * @summary Verified personal admin account from the server session
+ */
+
+export function useGetAdminSession<TData = Awaited<ReturnType<typeof getAdminSession>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminSessionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetAdminOrderUrl = (id: string,) => {
 
@@ -140,7 +218,7 @@ export const getChangeAdminOrderStatusUrl = (id: string,) => {
 }
 
 /**
- * @summary Change status with a self-declared shared-passcode admin name
+ * @summary Change status with identity derived from a verified admin session
  */
 export const changeAdminOrderStatus = async (id: string,
     orderStatusChangeInput: OrderStatusChangeInput, options?: Parameters<typeof customFetch>[1]): Promise<AdminOrder> => {
@@ -190,7 +268,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ChangeAdminOrderStatusMutationError = ErrorType<void>
 
     /**
- * @summary Change status with a self-declared shared-passcode admin name
+ * @summary Change status with identity derived from a verified admin session
  */
 export const useChangeAdminOrderStatus = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeAdminOrderStatus>>, TError,{id: string;data: BodyType<OrderStatusChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

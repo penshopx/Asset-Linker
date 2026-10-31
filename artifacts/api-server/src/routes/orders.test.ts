@@ -23,7 +23,19 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import { decryptAdminActor, encryptAdminActor } from '../lib/admin-actor';
+import { decryptAdminIdentity, encryptAdminActor } from '../lib/admin-actor';
+
+// Signed-in state is an SDK boundary fixture, never a production auth bypass.
+vi.mock('@clerk/express', () => ({
+  clerkMiddleware: () => (_req: any, _res: any, next: any) => next(),
+  getAuth: (req: any) => ({ userId: req.headers['x-test-session'] ? 'user_rina' : null }),
+  clerkClient: { users: { getUser: async () => ({
+    id: 'user_rina', firstName: 'Admin', lastName: 'Rina',
+    primaryEmailAddressId: 'email_rina',
+    emailAddresses: [{ id: 'email_rina', emailAddress: 'rina@example.test', verification: { status: 'verified' } }],
+    publicMetadata: { role: 'admin' }, privateMetadata: {},
+  }) } },
+}));
 
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 const mockRpc = vi.fn();
@@ -228,13 +240,13 @@ describe('GET /api/admin/orders/:id', () => {
 
     const res = await request(app)
       .get('/api/admin/orders/order-uuid-123')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+      .set('x-test-session', 'rina');
 
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(FAKE_ORDER.id);
     expect(res.body.history).toEqual([
-      { ...history[0], changed_by: null },
-      { ...history[1], changed_by: 'Admin Rina' },
+      { ...history[0], changed_by: null, changed_by_id: null, changed_by_verified: false },
+      { ...history[1], changed_by: 'Admin Rina', changed_by_id: null, changed_by_verified: false },
     ]);
     expect(res.body.history[0].status).toBe('baru');
     expect(mockFrom).toHaveBeenNthCalledWith(1, 'orders');
@@ -249,7 +261,7 @@ describe('GET /api/admin/orders/:id', () => {
 
     const res = await request(app)
       .get('/api/admin/orders/nonexistent')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+      .set('x-test-session', 'rina');
 
     expect(res.status).toBe(404);
   });
@@ -269,7 +281,7 @@ describe('GET /api/admin/orders/:id', () => {
       }));
     const res = await request(app)
       .get(`/api/admin/orders/${FAKE_ORDER.id}`)
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+      .set('x-test-session', 'rina');
     expect(res.status).toBe(500);
     expect(JSON.stringify(res.body)).not.toContain('invalid-plaintext');
   });
@@ -289,7 +301,7 @@ describe('GET /api/admin/orders/:id', () => {
 
     const res = await request(app)
       .get('/api/admin/orders/order-uuid-123')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode');
+      .set('x-test-session', 'rina');
 
     expect(res.status).toBe(200);
     expect(res.body.history).toEqual([]);
@@ -303,18 +315,18 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
     vi.stubEnv('SESSION_SECRET', '');
     const res = await request(app)
       .patch(`/api/admin/orders/${FAKE_ORDER.id}/status`)
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses', changed_by: 'Admin Rina' });
+      .set('x-test-session', 'rina')
+      .send({ status: 'diproses' });
     expect(res.status).toBe(503);
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, null, '', '   ', 123, 'x'.repeat(81), 'Admin\nRina'])(
-    'rejects invalid admin identity %j without touching the database',
+  it.each([null, '', '   ', 123, 'x'.repeat(81), 'Admin\nRina', 'Admin Palsu'])(
+    'rejects client-supplied identity %j without touching the database',
     async (changed_by) => {
       const res = await request(app)
         .patch('/api/admin/orders/order-uuid-123/status')
-        .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
+        .set('x-test-session', 'rina')
         .send({ status: 'diproses', changed_by });
       expect(res.status).toBe(400);
       expect(mockFrom).not.toHaveBeenCalled();
@@ -336,8 +348,8 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
 
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses', changed_by: '  Admin Rina  ' });
+      .set('x-test-session', 'rina')
+      .send({ status: 'diproses' });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('diproses');
@@ -345,7 +357,9 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
     expect(orderUpdate).toHaveBeenCalledWith({ status: 'diproses', status_changed_by: expect.stringMatching(/^enc:v1:/) });
     const envelope = orderUpdate.mock.calls[0][0].status_changed_by;
     expect(envelope).not.toContain('Admin Rina');
-    expect(decryptAdminActor(envelope, FAKE_ORDER.id)).toBe('Admin Rina');
+    expect(decryptAdminIdentity(envelope, FAKE_ORDER.id)).toEqual({
+      changed_by: 'Admin Rina', changed_by_id: 'user_rina', changed_by_verified: true,
+    });
 
     // The trigger owns history insertion; the API must not bypass it with a
     // direct write that would violate the table's RLS policy.
@@ -358,8 +372,8 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
   it('returns 400 for an invalid status value', async () => {
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'invalid-status', changed_by: 'Admin Rina' });
+      .set('x-test-session', 'rina')
+      .send({ status: 'invalid-status' });
 
     expect(res.status).toBe(400);
   });
@@ -375,8 +389,8 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
 
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses', changed_by: 'Admin Rina' });
+      .set('x-test-session', 'rina')
+      .send({ status: 'diproses' });
 
     expect(res.status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -398,8 +412,8 @@ describe('PATCH /api/admin/orders/:id/status — no direct status_history writes
 
     const res = await request(app)
       .patch('/api/admin/orders/order-uuid-123/status')
-      .set('x-admin-passcode', process.env['ADMIN_PASSCODE'] ?? 'test-passcode')
-      .send({ status: 'diproses', changed_by: 'Admin Rina' });
+      .set('x-test-session', 'rina')
+      .send({ status: 'diproses' });
 
     expect(res.status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));

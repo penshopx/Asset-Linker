@@ -6,4 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AdminPasscodeParameter = string;
+export interface AdminIdentity {
+  id: string;
+  name: string;
+  email: string;
+}

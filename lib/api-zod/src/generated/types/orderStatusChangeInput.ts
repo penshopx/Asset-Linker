@@ -9,10 +9,4 @@ import type { OrderStatus } from './orderStatus';
 
 export interface OrderStatusChangeInput {
   status: OrderStatus;
-  /**
-     * Trimmed self-declared admin name, no control characters; not a verified personal account.
-     * @minLength 1
-     * @maxLength 80
-     */
-  changed_by: string;
 }

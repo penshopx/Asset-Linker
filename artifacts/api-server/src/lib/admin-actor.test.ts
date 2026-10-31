@@ -1,10 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decryptAdminActor, encryptAdminActor, withoutActorEnvelope } from "./admin-actor";
+import { decryptAdminActor, decryptAdminIdentity, encryptAdminActor, encryptVerifiedAdminActor, withoutActorEnvelope } from "./admin-actor";
 
 beforeEach(() => vi.stubEnv("SESSION_SECRET", "test-audit-secret-only"));
 afterEach(() => vi.unstubAllEnvs());
 
 describe("admin-only actor decryption", () => {
+  it("distinguishes verified account snapshots from old self-declared names and nulls", () => {
+    const envelope = encryptVerifiedAdminActor({ id: 'user_rina', name: 'Rina 李', email: 'rina@example.test' }, 'order-1');
+    expect(envelope).not.toContain('user_rina');
+    expect(decryptAdminIdentity(envelope, 'order-1')).toEqual({
+      changed_by: 'Rina 李', changed_by_id: 'user_rina', changed_by_verified: true,
+    });
+    expect(decryptAdminIdentity(encryptAdminActor('Old Rina', 'order-1'), 'order-1')).toEqual({
+      changed_by: 'Old Rina', changed_by_id: null, changed_by_verified: false,
+    });
+    expect(decryptAdminIdentity(null, 'order-1')).toEqual({
+      changed_by: null, changed_by_id: null, changed_by_verified: false,
+    });
+    const oldJsonName = '{"version":2,"id":"fake","name":"Pretend Admin"}';
+    expect(decryptAdminIdentity(encryptAdminActor(oldJsonName, 'order-1'), 'order-1')).toEqual({
+      changed_by: oldJsonName, changed_by_id: null, changed_by_verified: false,
+    });
+  });
   it("stores an opaque authenticated envelope and preserves Unicode names", () => {
     const envelope = encryptAdminActor("Rina 李", "order-1");
     expect(envelope).toMatch(/^enc:v1:[A-Za-z0-9+/=]+$/);

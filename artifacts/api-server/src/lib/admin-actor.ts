@@ -1,6 +1,10 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import type { AdminIdentity } from "../middlewares/require-admin";
 
 const PREFIX = "enc:v1:";
+// Legacy self-declared names rejected control characters. A NUL-delimited
+// discriminator therefore cannot reinterpret an old name as a verified account.
+const VERIFIED_PREFIX = "\0verified-admin:v2\0";
 
 function actorKey(): Buffer {
   const secret = process.env["SESSION_SECRET"];
@@ -30,6 +34,27 @@ export function decryptAdminActor(value: unknown, orderId: string): string | nul
   decipher.setAAD(Buffer.from(orderId));
   decipher.setAuthTag(payload.subarray(12, 28));
   return Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]).toString("utf8");
+}
+
+/** Store the stable provider ID and name snapshot together inside the envelope.
+ * No additional public DB identity column is needed, and old envelopes stay valid. */
+export function encryptVerifiedAdminActor(admin: AdminIdentity, orderId: string): string {
+  return encryptAdminActor(VERIFIED_PREFIX + JSON.stringify({
+    version: 2, id: admin.id, name: admin.name,
+  }), orderId);
+}
+
+export function decryptAdminIdentity(value: unknown, orderId: string) {
+  const plaintext = decryptAdminActor(value, orderId);
+  if (plaintext?.startsWith(VERIFIED_PREFIX)) {
+    const actor = JSON.parse(plaintext.slice(VERIFIED_PREFIX.length));
+    if (typeof actor.id !== "string" || !actor.id ||
+        typeof actor.name !== "string" || !actor.name) {
+      throw new Error("Invalid verified admin identity");
+    }
+    return { changed_by: actor.name, changed_by_id: actor.id, changed_by_verified: true };
+  }
+  return { changed_by: plaintext, changed_by_id: null, changed_by_verified: false };
 }
 
 /** The order's internal audit envelope is not part of any API response. */

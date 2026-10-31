@@ -5,6 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface AdminIdentity {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export type OrderStatus = typeof OrderStatus[keyof typeof OrderStatus];
 
 
@@ -17,12 +23,6 @@ export const OrderStatus = {
 
 export interface OrderStatusChangeInput {
   status: OrderStatus;
-  /**
-     * Trimmed self-declared admin name, no control characters; not a verified personal account.
-     * @minLength 1
-     * @maxLength 80
-     */
-  changed_by: string;
 }
 
 export interface AdminOrder {
@@ -39,6 +39,13 @@ export interface AdminStatusHistoryEntry {
      * @nullable
      */
   changed_by?: string | null;
+  /**
+     * Stable account ID, null for legacy entries. Admin-only.
+     * @nullable
+     */
+  changed_by_id?: string | null;
+  /** True only for server-verified personal account snapshots; false for legacy self-declared names. */
+  changed_by_verified?: boolean;
 }
 
 export type AdminOrderDetail = AdminOrder & {
@@ -116,6 +123,4 @@ export interface EmailReadinessStatus {
 export interface HealthStatus {
   status: string;
 }
-
-export type AdminPasscodeParameter = string;
 
