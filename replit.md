@@ -9,7 +9,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - Release validation (`Project`) runs `simulator-tests`, `mobile-tests`, and `simulator-typecheck` together. Keep `simulator-typecheck` registered as `pnpm --filter @workspace/lkut-simulator run typecheck`; simulator TypeScript errors must fail the release check independently of runtime test results.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/api-server run test` — API quality gate, including real PostgreSQL order-idempotency contracts. Requires `initdb`, `pg_ctl`, and `psql` on PATH (run as a non-root user); missing tools fail the gate, not skip it. Tests create disposable local clusters and never use Supabase credentials or production data.
+- `pnpm --filter @workspace/api-server run test` — API quality gate, including real PostgreSQL order-idempotency and concurrent admin status-audit contracts. Requires `initdb`, `pg_ctl`, and `psql` on PATH (run as a non-root user); missing tools fail the gate, not skip it. Tests create disposable local clusters and never use Supabase credentials or production data.
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required environment variables:
   - `DATABASE_URL` — Postgres connection string (provided by Replit)
