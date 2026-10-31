@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setImmediate } from "node:timers/promises";
+import { Client, type QueryResult } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PROOF_CLEANUP_SQL } from "./proof-cleanup-migration";
 import { reconcileLegacyProofs } from "./proof-reconciliation";
@@ -240,6 +242,165 @@ describe("persistent proof cleanup with real PostgreSQL", () => {
     sql(`SELECT complete_proof_cleanup('lease.pdf', '${token1}');`);
     expect(sql("SELECT state FROM proof_cleanup;")).toBe("deleting");
     sql(`SELECT complete_proof_cleanup('lease.pdf', '${token2}');`);
+    expect(sql("SELECT state FROM proof_cleanup;")).toBe("deleted");
+  });
+});
+
+describe("concurrent proof cleanup with independent PostgreSQL connections", () => {
+  const token1 = "11111111-1111-4111-8111-111111111111";
+  const token2 = "22222222-2222-4222-8222-222222222222";
+  let winner: Client;
+  let contender: Client;
+  let winnerPid: number;
+  let contenderPid: number;
+
+  beforeEach(async () => {
+    const options = {
+      host: directory, port: 55446, user: "cleanup_owner", database: "postgres",
+      // Bounds are failure guards, never synchronization delays.
+      statement_timeout: 8_000,
+    };
+    winner = new Client(options);
+    contender = new Client(options);
+    await Promise.all([winner.connect(), contender.connect()]);
+    winnerPid = (await winner.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    contenderPid = (await contender.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    expect(winnerPid).not.toBe(contenderPid);
+    await Promise.all([
+      winner.query("BEGIN ISOLATION LEVEL READ COMMITTED"),
+      contender.query("BEGIN ISOLATION LEVEL READ COMMITTED"),
+    ]);
+  });
+
+  afterEach(async () => {
+    // Release the blocker first, including on assertion failure, then drain the
+    // contender's transaction before closing either connection.
+    try {
+      await winner?.query("ROLLBACK");
+      await contender?.query("ROLLBACK");
+    } finally {
+      await Promise.all([winner?.end(), contender?.end()]);
+    }
+  });
+
+  function pending(query: Promise<QueryResult>) {
+    // Attach a rejection handler immediately: the losing order is expected to
+    // fail, but only after we have observed its actual PostgreSQL lock wait.
+    return query.then(
+      (result) => ({ result, error: undefined }),
+      (error: unknown) => ({ result: undefined, error }),
+    );
+  }
+
+  async function waitForContention() {
+    const deadline = performance.now() + 4_000;
+    while (performance.now() < deadline) {
+      const { rows } = await winner.query(
+        "SELECT $1::int = ANY(pg_blocking_pids($2::int)) AS blocked",
+        [winnerPid, contenderPid],
+      );
+      if (rows[0].blocked) return;
+      await setImmediate();
+    }
+    throw new Error("Contender never blocked on the winning PostgreSQL transaction");
+  }
+
+  const orderCases = [
+    { operation: "insert", column: "bukti_filename" },
+    { operation: "insert", column: "bukti_url" },
+    { operation: "update", column: "bukti_filename" },
+    { operation: "update", column: "bukti_url" },
+  ] as const;
+
+  function orderWrite(operation: "insert" | "update", column: string) {
+    const filename = "concurrent.pdf";
+    sql(`SELECT register_proof_upload('${filename}');`);
+    const id = operation === "update"
+      ? Number(sql("INSERT INTO orders DEFAULT VALUES RETURNING id;").split("\n")[0])
+      : undefined;
+    const value = column === "bukti_url"
+      ? `https://example.test/storage/v1/object/public/proofs/${filename}?download=1`
+      : filename;
+    return {
+      filename, value,
+      query: operation === "insert"
+        ? `INSERT INTO orders(${column}) VALUES ($1)`
+        : `UPDATE orders SET ${column} = $1 WHERE id = ${id}`,
+    };
+  }
+
+  it.each(orderCases)(
+    "protects the proof when order $operation via $column commits before the waiting claim",
+    async ({ operation, column }) => {
+      const write = orderWrite(operation, column);
+      await winner.query(write.query, [write.value]);
+      const claim = pending(contender.query(
+        "SELECT claim_proof_cleanup($1, $2, TRUE) AS claimed", [write.filename, token1],
+      ));
+      await waitForContention();
+      await winner.query("COMMIT");
+      const outcome = await claim;
+      expect(outcome.error).toBeUndefined();
+      expect(outcome.result?.rows).toEqual([{ claimed: false }]);
+      await contender.query("COMMIT");
+      expect(sql("SELECT count(*) FROM orders WHERE " + column + " IS NOT NULL;")).toBe("1");
+      expect(sql("SELECT count(*) FROM proof_cleanup;")).toBe("0");
+    },
+  );
+
+  it.each(orderCases)(
+    "rejects the waiting order $operation via $column when the cleanup claim commits first",
+    async ({ operation, column }) => {
+      const write = orderWrite(operation, column);
+      const claim = await winner.query(
+        "SELECT claim_proof_cleanup($1, $2, TRUE) AS claimed", [write.filename, token1],
+      );
+      expect(claim.rows).toEqual([{ claimed: true }]);
+      const order = pending(contender.query(write.query, [write.value]));
+      await waitForContention();
+      await winner.query("COMMIT");
+      const outcome = await order;
+      expect(outcome.error).toMatchObject({
+        code: "23514", message: "Proof is reserved for cleanup",
+      });
+      await contender.query("ROLLBACK");
+      expect(sql("SELECT count(*) FROM orders WHERE bukti_filename IS NOT NULL OR bukti_url IS NOT NULL;")).toBe("0");
+      expect(sql("SELECT count(*) FROM orders;")).toBe(operation === "update" ? "1" : "0");
+      expect(sql("SELECT state || ':' || lease_token || ':' || attempts FROM proof_cleanup;"))
+        .toBe(`deleting:${token1}:1`);
+    },
+  );
+
+  it("gives only one worker the active lease and recovers it with a new token after expiry", async () => {
+    sql("SELECT register_proof_upload('workers.pdf');");
+    expect((await winner.query(
+      "SELECT claim_proof_cleanup('workers.pdf', $1, TRUE) AS claimed", [token1],
+    )).rows).toEqual([{ claimed: true }]);
+    // Force must not steal an active lease, even after waiting for its commit.
+    const competingClaim = pending(contender.query(
+      "SELECT claim_proof_cleanup('workers.pdf', $1, TRUE) AS claimed", [token2],
+    ));
+    await waitForContention();
+    await winner.query("COMMIT");
+    const outcome = await competingClaim;
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.result?.rows).toEqual([{ claimed: false }]);
+    await contender.query("COMMIT");
+    expect(sql("SELECT lease_token || ':' || attempts FROM proof_cleanup;")).toBe(`${token1}:1`);
+
+    // Expire persisted state explicitly; no clock advance or sleep is needed.
+    await winner.query("UPDATE proof_cleanup SET next_attempt_at = '-infinity';");
+    expect((await contender.query(
+      "SELECT claim_proof_cleanup('workers.pdf', $1, FALSE) AS claimed", [token2],
+    )).rows).toEqual([{ claimed: true }]);
+    expect(sql("SELECT state || ':' || lease_token || ':' || attempts FROM proof_cleanup;"))
+      .toBe(`deleting:${token2}:2`);
+    expect((await winner.query(
+      "SELECT claim_proof_cleanup('workers.pdf', $1, TRUE) AS claimed", [token1],
+    )).rows).toEqual([{ claimed: false }]);
+    await winner.query("SELECT complete_proof_cleanup('workers.pdf', $1);", [token1]);
+    expect(sql("SELECT state || ':' || lease_token FROM proof_cleanup;")).toBe(`deleting:${token2}`);
+    await contender.query("SELECT complete_proof_cleanup('workers.pdf', $1);", [token2]);
     expect(sql("SELECT state FROM proof_cleanup;")).toBe("deleted");
   });
 });
