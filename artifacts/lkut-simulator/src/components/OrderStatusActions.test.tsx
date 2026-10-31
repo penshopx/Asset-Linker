@@ -76,7 +76,7 @@ describe('order status sharing', () => {
     let pending!: Promise<void>;
     await act(async () => { pending = buttons[0].props.onClick(); });
     expect(buttons[0].props.disabled).toBe(true);
-    expect(buttons[1].props.disabled).toBe(false);
+    expect(buttons[1].props['aria-disabled']).toBe(false);
     await act(async () => { finish(); await pending; });
     expect(buttons[0].props.disabled).toBe(false);
   });

@@ -7,3 +7,4 @@
 - [Prinsip validasi](review-validation-principles.md) — toleransi skor, grade eksak, penyelidikan kegagalan, batas kebijakan data parsial, dan sumber pemulihan.
 - [Identitas audit admin](admin-audit-identity.md) — passcode bersama hanya mendukung nama yang diisi sendiri, bukan identitas akun terverifikasi.
 - [Keamanan pembersihan bukti](proof-cleanup-safety.md) — simpan reservasi sebelum unggah dan pertahankan penanda penghapusan untuk menolak referensi pesanan yang terlambat.
+- [Regresi akses keyboard browser](browser-keyboard-regressions.md) — jaga fokus selama operasi asinkron; izin browser harus berlaku di konteks tes dan warna CSS perlu dinormalisasi.

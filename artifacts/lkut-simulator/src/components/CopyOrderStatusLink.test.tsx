@@ -62,14 +62,19 @@ describe('copy order status link', () => {
 
   it('shows pending feedback until copying finishes', async () => {
     let resolveCopy!: () => void;
+    const writeText = vi.fn(() => new Promise<void>(resolve => { resolveCopy = resolve; }));
     const button = await renderButton({
-      writeText: () => new Promise<void>(resolve => { resolveCopy = resolve; }),
+      writeText,
     });
     let pending: Promise<void>;
     await act(async () => { pending = button.props.onClick(); });
-    expect(button.props.disabled).toBe(true);
+    // aria-disabled keeps native keyboard focus while the async write is pending.
+    expect(button.props.disabled).toBeUndefined();
+    expect(button.props['aria-disabled']).toBe(true);
     expect(button.children.join('')).toContain('Menyalin tautan');
+    await act(async () => button.props.onClick());
+    expect(writeText).toHaveBeenCalledOnce();
     await act(async () => { resolveCopy(); await pending; });
-    expect(button.props.disabled).toBe(false);
+    expect(button.props['aria-disabled']).toBe(false);
   });
 });

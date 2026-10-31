@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { getOrderStatusUrl } from '@/lib/orderSummaryStorage';
 
 export function CopyOrderStatusLink({ orderId }: { orderId: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copying' | 'success' | 'error'>('idle');
   const [manualUrl, setManualUrl] = useState('');
+  const copying = useRef(false);
 
   async function copyLink() {
+    if (copying.current) return;
+    copying.current = true;
     setCopyState('copying');
     const url = new URL(
       getOrderStatusUrl(import.meta.env.BASE_URL, orderId),
@@ -20,6 +23,8 @@ export function CopyOrderStatusLink({ orderId }: { orderId: string }) {
     } catch {
       setManualUrl(url);
       setCopyState('error');
+    } finally {
+      copying.current = false;
     }
   }
 
@@ -28,8 +33,8 @@ export function CopyOrderStatusLink({ orderId }: { orderId: string }) {
       <button
         type="button"
         onClick={copyLink}
-        disabled={copyState === 'copying'}
-        className="inline-flex items-center justify-center gap-2 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-60 disabled:cursor-wait focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+        aria-disabled={copyState === 'copying'}
+        className="inline-flex items-center justify-center gap-2 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700 aria-disabled:opacity-60 aria-disabled:cursor-wait focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
       >
         <Copy className="w-4 h-4" aria-hidden="true" />
         {copyState === 'copying' ? 'Menyalin tautan…' : 'Salin tautan status pesanan'}
