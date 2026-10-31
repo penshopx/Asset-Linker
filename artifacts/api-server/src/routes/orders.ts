@@ -17,9 +17,13 @@ import type { OrderEmailData } from "../lib/mailer";
 import { decryptAdminIdentity, encryptVerifiedAdminActor, withoutActorEnvelope } from "../lib/admin-actor";
 import { requireAdmin, type AdminIdentity } from "../middlewares/require-admin";
 import { cleanupUploadedProof, registerProofUpload } from "../lib/proof-cleanup";
+import { MAX_PROOF_BYTES, validatePaymentProof } from "../lib/payment-proof";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Busboy flags a file at its limit, so allow one extra byte here and enforce
+// the inclusive 10 MB boundary after parsing.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PROOF_BYTES + 1 } });
+const parseProof = upload.single("bukti_pembayaran");
 
 // ─── Idempotency ──────────────────────────────────────────────────────────────
 // Source of truth: the `idempotency_keys` DB table (write-protected by RLS,
@@ -49,8 +53,25 @@ router.get("/admin/session", requireAdmin, (_req, res) => {
 // ─── POST /api/konfirmasi-pesanan ─────────────────────────────────────────────
 router.post(
   "/konfirmasi-pesanan",
-  upload.single("bukti_pembayaran"),
+  (req, res, next) => {
+    parseProof(req, res, (error: unknown) => {
+      if (error instanceof multer.MulterError) {
+        const tooLarge = error.code === "LIMIT_FILE_SIZE";
+        res.status(tooLarge ? 413 : 400).json({
+          error: tooLarge
+            ? "Ukuran bukti pembayaran maksimal 10 MB."
+            : "Unggahan bukti pembayaran tidak valid. Kirim satu berkas pada kolom bukti_pembayaran.",
+        });
+        return;
+      }
+      next(error);
+    });
+  },
   async (req, res) => {
+    const proof = req.file ? validatePaymentProof(req.file) : null;
+    if (proof && "error" in proof) {
+      return res.status(proof.status).json({ error: proof.error });
+    }
     const { nama_perusahaan, nama_pic, email, whatsapp, produk, catatan } =
       req.body as Record<string, string>;
 
@@ -96,9 +117,8 @@ router.post(
     let buktFilename: string | null = null;
     let uploadedProofFilename: string | null = null;
 
-    if (req.file) {
-      const ext = req.file.originalname.split(".").pop() ?? "bin";
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    if (req.file && proof && "mime" in proof) {
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${proof.extension}`;
       buktFilename = filename;
 
       try {
@@ -114,7 +134,7 @@ router.post(
         const { error: uploadError } = await supabase.storage
           .from("proofs")
           .upload(filename, req.file.buffer, {
-            contentType: req.file.mimetype,
+            contentType: proof.mime,
             upsert: false,
           });
 

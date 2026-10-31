@@ -151,6 +151,86 @@ function buildQueryStub(resolveWith: { data?: unknown; error?: unknown }) {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+describe('POST /api/konfirmasi-pesanan payment proof validation', () => {
+  const maxBytes = 10 * 1024 * 1024;
+  const pdf = Buffer.from('%PDF-1.4\n%%EOF');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1sAAAAASUVORK5CYII=', 'base64');
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xd9]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRpc.mockResolvedValue(rpcNewOrder());
+    mockFrom.mockReturnValue(buildQueryStub({ data: { id: FAKE_ORDER.id }, error: null }));
+  });
+
+  function submit(buffer: Buffer, filename: string, contentType: string) {
+    return request(app).post('/api/konfirmasi-pesanan')
+      .field('nama_perusahaan', 'PT Test').field('nama_pic', 'Budi')
+      .field('email', 'budi@test.com').field('whatsapp', '08123456789')
+      .field('produk', 'Layanan A')
+      .attach('bukti_pembayaran', buffer, { filename, contentType });
+  }
+
+  it.each([
+    ['proof.pdf', 'application/pdf', pdf, 'application/pdf'],
+    ['proof.PNG', 'image/png', png, 'image/png'],
+    ['proof.jpg', 'image/jpeg', jpeg, 'image/jpeg'],
+    ['proof.jpeg', 'image/jpeg', jpeg, 'image/jpeg'],
+    ['proof.pdf', 'application/octet-stream', pdf, 'application/pdf'],
+  ])('accepts matching content in %s with %s', async (filename, contentType, bytes, storedMime) => {
+    const res = await submit(bytes, filename, contentType);
+    expect(res.status).toBe(201);
+    expect(mockStorageUpload).toHaveBeenCalledWith(
+      expect.any(String), bytes, { contentType: storedMime, upsert: false },
+    );
+    expect(mockProofRpc).toHaveBeenCalledWith('register_proof_upload', expect.any(Object));
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['renamed text', 'proof.jpg', 'image/jpeg', Buffer.from('<html>not an image</html>')],
+    ['forged MIME', 'proof.pdf', 'image/png', pdf],
+    ['wrong signature', 'proof.png', 'image/png', pdf],
+    ['unsupported extension', 'proof.exe', 'application/pdf', pdf],
+    ['unsupported MIME', 'proof.pdf', 'text/plain', pdf],
+    ['empty file', 'proof.pdf', 'application/pdf', Buffer.alloc(0)],
+    ['truncated PNG signature', 'proof.png', 'image/png', png.subarray(0, 7)],
+    ['truncated JPEG signature', 'proof.jpg', 'image/jpeg', jpeg.subarray(0, 2)],
+    ['truncated PDF signature', 'proof.pdf', 'application/pdf', pdf.subarray(0, 4)],
+  ])('rejects %s without persistent side effects', async (_label, filename, contentType, bytes) => {
+    const res = await submit(bytes, filename, contentType);
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toMatch(/json/);
+    expect(res.body.error).toMatch(/berkas|kosong/i);
+    expect(mockProofRpc).not.toHaveBeenCalled();
+    expect(mockStorageFrom).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it.each([maxBytes - 1, maxBytes])('accepts a supported file of %i bytes', async (size) => {
+    const bytes = Buffer.alloc(size, 0x20);
+    pdf.copy(bytes);
+    const res = await submit(bytes, 'proof.pdf', 'application/pdf');
+    expect(res.status).toBe(201);
+    expect(mockStorageUpload).toHaveBeenCalledTimes(1);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([maxBytes + 1, maxBytes + 1024])('rejects a file of %i bytes with a JSON size error', async (size) => {
+    const bytes = Buffer.alloc(size, 0x20);
+    pdf.copy(bytes);
+    const res = await submit(bytes, 'proof.pdf', 'application/pdf');
+    expect(res.status).toBe(413);
+    expect(res.headers['content-type']).toMatch(/json/);
+    expect(res.body.error).toBe('Ukuran bukti pembayaran maksimal 10 MB.');
+    expect(mockProofRpc).not.toHaveBeenCalled();
+    expect(mockStorageFrom).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+});
+
 describe('GET /api/pesanan/:id', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -746,7 +826,7 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
         .field('email', 'budi@test.com')
         .field('whatsapp', '08123456789')
         .field('produk', 'Layanan A')
-        .attach('bukti_pembayaran', Buffer.from('proof'), 'proof.pdf');
+        .attach('bukti_pembayaran', Buffer.from('%PDF-1.4\n%%EOF'), 'proof.pdf');
 
       expect(res.status).toBe(500);
       expect(mockStorageUpload).toHaveBeenCalledTimes(1);
@@ -772,7 +852,7 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
       .field('nama_perusahaan', 'PT Test').field('nama_pic', 'Budi')
       .field('email', 'budi@test.com').field('whatsapp', '08123456789')
       .field('produk', 'Layanan A')
-      .attach('bukti_pembayaran', Buffer.from('proof'), 'proof.pdf');
+      .attach('bukti_pembayaran', Buffer.from('%PDF-1.4\n%%EOF'), 'proof.pdf');
     expect(res.status).toBe(503);
     expect(mockStorageUpload).not.toHaveBeenCalled();
     expect(mockRpc).not.toHaveBeenCalled();
@@ -784,7 +864,7 @@ describe('POST /api/konfirmasi-pesanan — DB-backed idempotency via RPC', () =>
       .field('nama_perusahaan', 'PT Test').field('nama_pic', 'Budi')
       .field('email', 'budi@test.com').field('whatsapp', '08123456789')
       .field('produk', 'Layanan A')
-      .attach('bukti_pembayaran', Buffer.from('proof'), 'proof.pdf');
+      .attach('bukti_pembayaran', Buffer.from('%PDF-1.4\n%%EOF'), 'proof.pdf');
     expect(res.status).toBe(200);
     expect(res.body.duplicate).toBe(true);
     expect(mockStorageRemove).toHaveBeenCalledWith([mockStorageUpload.mock.calls[0]![0]]);
